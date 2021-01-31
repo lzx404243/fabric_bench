@@ -1,7 +1,7 @@
-#include <iostream>
-#include "comm_exp.hpp"
 #include "bench_ofi.hpp"
-#include "bench_omp.hpp"
+#include "comm_exp.hpp"
+#include "thread_utils.hpp"
+#include <iostream>
 
 int thread_num = 1;
 int min_size = 8;
@@ -10,16 +10,14 @@ bool touch_data = true;
 int rank, size, target_rank;
 device_t device;
 cq_t *cqs;
-ctx_t *tx_ctxs;
-ctx_t *rx_ctxs;
+ctx_t *ctxs;
 addr_t *addrs;
 
 void* send_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
-    ctx_t& tx_ctx = tx_ctxs[thread_id];
-    ctx_t& rx_ctx = rx_ctxs[thread_id];
+    ctx_t& ctx = ctxs[thread_id];
     char *buf = (char*) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -28,14 +26,14 @@ void* send_thread(void* arg) {
     omp::thread_barrier();
     double t = wtime();
 
-    RUN_VARY_MSG({min_size, max_size}, true, [&](int msg_size, int iter) {
+    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       if (touch_data) write_buffer(buf, msg_size, s_data);
-      isend_tag(tx_ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+      isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
       while (req.type != REQ_TYPE_NULL) progress(cq);
-      irecv_tag(rx_ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+      irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
       while (req.type != REQ_TYPE_NULL) progress(cq);
       if (touch_data) check_buffer(buf, msg_size, r_data);
-    }, {thread_id, thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -44,8 +42,7 @@ void* recv_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
-    ctx_t& tx_ctx = tx_ctxs[thread_id];
-    ctx_t& rx_ctx = rx_ctxs[thread_id];
+    ctx_t& ctx = ctxs[thread_id];
     char *buf = (char*) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -54,14 +51,14 @@ void* recv_thread(void* arg) {
     omp::thread_barrier();
     double t = wtime();
 
-    RUN_VARY_MSG({min_size, max_size}, false, [&](int msg_size, int iter) {
-      irecv_tag(rx_ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+      irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
       while (req.type != REQ_TYPE_NULL) progress(cq);
       if (touch_data) check_buffer(buf, msg_size, r_data);
       if (touch_data) write_buffer(buf, msg_size, s_data);
-      isend_tag(tx_ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+      isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
       while (req.type != REQ_TYPE_NULL) progress(cq);
-    }, {thread_id, thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -78,20 +75,18 @@ int main(int argc, char *argv[]) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * max_size);
         exit(1);
     }
-    init_device(&device);
+    init_device(&device, thread_num != 1);
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
 
     cqs = (cq_t*) calloc(thread_num, sizeof(cq_t));
-    tx_ctxs = (ctx_t*) calloc(thread_num, sizeof(ctx_t));
-    rx_ctxs = (ctx_t*) calloc(thread_num, sizeof(ctx_t));
+    ctxs = (ctx_t*) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t*) calloc(thread_num, sizeof(addr_t));
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
-        init_tx_ctx(device, cqs[i], &tx_ctxs[i]);
-        init_rx_ctx(device, cqs[i], &rx_ctxs[i]);
-        put_ctx_addr(rx_ctxs[i], i);
+        init_ctx(device, cqs[i], &ctxs[i], CTX_SEND | CTX_RECV);
+        put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();
     for (int i = 0; i < thread_num; ++i) {

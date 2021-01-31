@@ -4,9 +4,10 @@
 
 #ifndef FABRICBENCH_COMM_EXP_HPP
 #define FABRICBENCH_COMM_EXP_HPP
+#include <iostream>
 #include <sys/time.h>
-#include "config.h"
-#include "bench_omp.hpp"
+#include "config.hpp"
+#include "thread_utils.hpp"
 
 static inline double wtime()
 {

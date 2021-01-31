@@ -13,7 +13,7 @@
 #include <rdma/fi_errno.h>
 #include <rdma/fi_tagged.h>
 
-#include "config.h"
+#include "config.hpp"
 #include "pmi_wrapper.h"
 #include "comm_exp.hpp"
 
@@ -29,7 +29,10 @@
   }                                                                       \
   while (0)                                                               \
     ;
-
+enum ctx_mode_t {
+    CTX_SEND,
+    CTX_RECV
+};
 struct device_t {
     fi_info *info;
     fid_fabric *fabric;
@@ -59,7 +62,7 @@ struct req_t {
     char pad[64-sizeof(req_type_t)];
 };
 
-static inline int init_device(device_t *device) {
+static inline int init_device(device_t *device, bool thread_safe) {
     pmi_master_init();
     int comm_rank = pmi_get_rank();
     int comm_size = pmi_get_size();
@@ -68,7 +71,8 @@ static inline int init_device(device_t *device) {
     hints = fi_allocinfo();
     hints->ep_attr->type = FI_EP_RDM;
     hints->domain_attr->mr_mode = FI_MR_VIRT_ADDR | FI_MR_ALLOCATED | FI_MR_PROV_KEY | FI_MR_LOCAL;
-    hints->domain_attr->threading = FI_THREAD_SAFE;
+    if (thread_safe)
+        hints->domain_attr->threading = FI_THREAD_SAFE;
     hints->caps = FI_TAGGED;
     hints->mode = FI_LOCAL_MR;
 
@@ -105,18 +109,9 @@ static inline int init_cq(device_t device, cq_t* cq) {
     return FB_OK;
 }
 
-static inline int init_tx_ctx(device_t device, cq_t cq, ctx_t* ctx) {
+static inline int init_ctx(device_t device, cq_t cq, ctx_t* ctx, uint64_t mode) {
     FI_SAFECALL(fi_endpoint(device.domain, device.info, &ctx->ep, nullptr));
-    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_TRANSMIT | FI_RECV));
-    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device.av, 0));
-    FI_SAFECALL(fi_enable(ctx->ep));
-    ctx->device = &device;
-    return FB_OK;
-}
-
-static inline int init_rx_ctx(device_t device, cq_t cq, ctx_t* ctx) {
-    FI_SAFECALL(fi_endpoint(device.domain, device.info, &ctx->ep, nullptr));
-    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_TRANSMIT | FI_RECV));
+    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device.av, 0));
     FI_SAFECALL(fi_enable(ctx->ep));
     ctx->device = &device;
