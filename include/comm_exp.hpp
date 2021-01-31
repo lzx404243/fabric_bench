@@ -78,7 +78,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
         omp::thread_barrier();
         t = wtime() - t;
 
-        if (report && omp::thread_id() == 0) {
+        if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;

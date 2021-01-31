@@ -28,7 +28,8 @@
     }                                                                     \
   }                                                                       \
   while (0)                                                               \
-    ;
+    ;                                                                     \
+
 enum ctx_mode_t {
     CTX_SEND,
     CTX_RECV
@@ -37,8 +38,6 @@ struct device_t {
     fi_info *info;
     fid_fabric *fabric;
     fid_domain *domain;
-    fid_ep *ep;
-    fid_cq *cq;
     fid_av *av;
     fid_mr *heap_mr;
     void *heap_ptr;
@@ -61,6 +60,8 @@ struct req_t {
     alignas(64) volatile req_type_t type;
     char pad[64-sizeof(req_type_t)];
 };
+
+const addr_t ADDR_ANY = {FI_ADDR_UNSPEC};
 
 static inline int init_device(device_t *device, bool thread_safe) {
     pmi_master_init();
@@ -109,12 +110,26 @@ static inline int init_cq(device_t device, cq_t* cq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t device, cq_t cq, ctx_t* ctx, uint64_t mode) {
-    FI_SAFECALL(fi_endpoint(device.domain, device.info, &ctx->ep, nullptr));
+static inline int init_ctx(device_t *device, cq_t cq, ctx_t* ctx, uint64_t mode) {
+    FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
-    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device.av, 0));
+    FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
     FI_SAFECALL(fi_enable(ctx->ep));
-    ctx->device = &device;
+    ctx->device = device;
+    return FB_OK;
+}
+
+static inline int register_ctx_self(ctx_t ctx, addr_t *addr) {
+    // Now exchange end-point address and heap address.
+    const int EP_ADDR_LEN = 6;
+    uint64_t my_addr[EP_ADDR_LEN];
+    size_t addrlen = 0;
+    fi_getname((fid_t) ctx.ep, nullptr, &addrlen);
+    assert(addrlen <= 8 * EP_ADDR_LEN);
+    FI_SAFECALL(fi_getname((fid_t) ctx.ep, my_addr, &addrlen));
+
+    int ret = fi_av_insert(ctx.device->av, (void *)my_addr, 1, &(addr->addr), 0, nullptr);
+    assert(ret == 1);
     return FB_OK;
 }
 
@@ -156,7 +171,7 @@ static inline int get_ctx_addr(device_t device, int rank, int id, addr_t *addr) 
     pmi_get(key, value);
     sscanf(value, PARSE_STRING,
            &peer_addr[0], &peer_addr[1], &peer_addr[2], &peer_addr[3], &peer_addr[4], &peer_addr[5]);
-    int ret = fi_av_insert(device.av, (void *) &peer_addr, 1, &addr->addr, 0, nullptr);
+    int ret = fi_av_insert(device.av, (void *)peer_addr, 1, &addr->addr, 0, nullptr);
     assert(ret == 1);
     return FB_OK;
 }

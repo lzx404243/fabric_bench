@@ -3,9 +3,9 @@
 #include "thread_utils.hpp"
 #include <iostream>
 
-int thread_num = 1;
+int thread_num = 4;
 int min_size = 8;
-int max_size = 64;
+int max_size = 8192;
 bool touch_data = true;
 int rank, size, target_rank;
 device_t device;
@@ -22,9 +22,6 @@ void* send_thread(void* arg) {
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
     req_t req = {REQ_TYPE_NULL};
-
-    omp::thread_barrier();
-    double t = wtime();
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       if (touch_data) write_buffer(buf, msg_size, s_data);
@@ -47,9 +44,6 @@ void* recv_thread(void* arg) {
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
     req_t req = {REQ_TYPE_NULL};
-
-    omp::thread_barrier();
-    double t = wtime();
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
@@ -85,7 +79,7 @@ int main(int argc, char *argv[]) {
     addrs = (addr_t*) calloc(thread_num, sizeof(addr_t));
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
-        init_ctx(device, cqs[i], &ctxs[i], CTX_SEND | CTX_RECV);
+        init_ctx(&device, cqs[i], &ctxs[i], CTX_SEND | CTX_RECV);
         put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();
