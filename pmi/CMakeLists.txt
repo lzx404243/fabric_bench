@@ -1,0 +1,10 @@
+option(USE_PMI2 "Use PMI2 to spawn the jobs" OFF)
+
+add_library(pmi-obj OBJECT)
+target_include_directories(pmi-obj PUBLIC ./)
+target_sources(pmi-obj PRIVATE pmi_wrapper.c)
+if(USE_PMI2)
+    add_subdirectory(pmi2)
+else()
+    add_subdirectory(pmi1)
+endif()

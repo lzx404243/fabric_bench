@@ -1,0 +1,19 @@
+#ifndef CONFIG_H_
+#define CONFIG_H_
+
+#define FB_OK 0
+#define FB_ERROR 1
+
+#cmakedefine USE_PMI2
+#define HEAP_SIZE 1*1024*1024
+#define CQ_SIZE 16*1024
+
+#define LARGE 8192
+
+#define TOTAL 4000
+#define SKIP 1000
+
+#define TOTAL_LARGE 1000
+#define SKIP_LARGE 100
+
+#endif
