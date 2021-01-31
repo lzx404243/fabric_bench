@@ -69,12 +69,16 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
         }
 
         omp::thread_barrier();
+        if (omp::thread_id() == 0) pmi_barrier();
+        omp::thread_barrier();
         t = wtime();
 
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
         }
 
+        omp::thread_barrier();
+        if (omp::thread_id() == 0) pmi_barrier();
         omp::thread_barrier();
         t = wtime() - t;
 
@@ -93,5 +97,17 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
     }
 
     omp::thread_barrier();
+    if (omp::thread_id() == 0) pmi_barrier();
+    omp::thread_barrier();
+}
+
+inline int comm_set_me_to(int core_id)
+{
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+
+    pthread_t current_thread = pthread_self();
+    return pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
 }
 #endif//FABRICBENCH_COMM_EXP_HPP

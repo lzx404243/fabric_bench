@@ -35,8 +35,6 @@ void* send_thread(void* arg) {
             for (int i = thread_id; i < tx_thread_num; i += rx_thread_num) {
                 char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
                 while (reqs[i].type != REQ_TYPE_NULL) {
-//                    for (int j = 0; j < tx_thread_num; j += rx_thread_num)
-//                        progress(tx_cqs[j]);
                     progress(rx_cqs[thread_id]);
                 }
                 if (touch_data) check_buffer(buf, msg_size, r_data);
@@ -82,8 +80,6 @@ void* recv_thread(void* arg) {
           for (int i = thread_id; i < tx_thread_num; i += rx_thread_num) {
               char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
               while (reqs[i].type != REQ_TYPE_NULL) {
-//                  for (int j = 0; j < tx_thread_num; j += rx_thread_num)
-//                      progress(tx_cqs[j]);
                   progress(rx_cqs[thread_id]);
               }
               if (touch_data) check_buffer(buf, msg_size, r_data);

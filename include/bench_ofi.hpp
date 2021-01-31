@@ -72,6 +72,8 @@ static inline int init_device(device_t *device, bool thread_safe) {
     hints = fi_allocinfo();
     hints->ep_attr->type = FI_EP_RDM;
     hints->domain_attr->mr_mode = FI_MR_VIRT_ADDR | FI_MR_ALLOCATED | FI_MR_PROV_KEY | FI_MR_LOCAL;
+    hints->domain_attr->control_progress = FI_PROGRESS_MANUAL;
+    hints->domain_attr->data_progress = FI_PROGRESS_MANUAL;
     if (thread_safe)
         hints->domain_attr->threading = FI_THREAD_SAFE;
     hints->caps = FI_TAGGED;
@@ -176,15 +178,17 @@ static inline int get_ctx_addr(device_t device, int rank, int id, addr_t *addr) 
     return FB_OK;
 }
 
-static inline void progress(cq_t cq)
+static inline bool progress(cq_t cq)
 {
     fi_cq_entry entry;
     fi_cq_err_entry error;
     ssize_t ret = fi_cq_read(cq.cq, &entry, 1);
     if (ret > 0) {
         req_t* r = (req_t*) entry.op_context;
-        if ( r != NULL )
+        if ( r != NULL ) {
             r->type = REQ_TYPE_NULL;
+            return true;
+        }
     } else if (ret == -FI_EAGAIN) {
     } else {
         assert(ret == -FI_EAVAIL);
@@ -192,6 +196,7 @@ static inline void progress(cq_t cq)
         printf("Err: %s\n", fi_strerror(error.err));
         exit(-1);
     }
+    return false;
 }
 
 static inline void isend_tag(ctx_t ctx, void* src, size_t size, addr_t target, int tag, req_t* req)
