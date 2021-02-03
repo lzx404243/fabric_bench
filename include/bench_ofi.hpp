@@ -16,6 +16,7 @@
 #include "config.hpp"
 #include "pmi_wrapper.h"
 #include "comm_exp.hpp"
+#include "mlog.h"
 
 
 #define FI_SAFECALL(x)                                                    \
@@ -57,13 +58,14 @@ enum req_type_t {
     REQ_TYPE_PEND
 };
 struct req_t {
-    alignas(64) volatile req_type_t type;
+    alignas(64) volatile req_type_t type; // change to atomic
     char pad[64-sizeof(req_type_t)];
 };
 
 const addr_t ADDR_ANY = {FI_ADDR_UNSPEC};
 
 static inline int init_device(device_t *device, bool thread_safe) {
+    MLOG_Init();
     pmi_master_init();
     int comm_rank = pmi_get_rank();
     int comm_size = pmi_get_size();

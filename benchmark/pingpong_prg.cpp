@@ -10,6 +10,7 @@ int rx_thread_num = 1;
 int min_size = 8;
 int max_size = 8192;
 bool touch_data = false;
+bool bind_prg_thread = true;
 int rank, size, target_rank;
 device_t device;
 cq_t *tx_cqs;
@@ -17,7 +18,7 @@ cq_t *rx_cqs;
 ctx_t *tx_ctxs;
 ctx_t *rx_ctxs;
 addr_t *addrs;
-std::atomic<int> *syncs;
+std::atomic<int> *syncs; // TODO： fix false sharing
 
 void* send_thread(void* arg) {
     int thread_id = omp::thread_id();
@@ -34,7 +35,7 @@ void* send_thread(void* arg) {
         if (touch_data) write_buffer(buf, msg_size, s_data);
         isend_tag(tx_ctx, buf, msg_size, addr, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) continue;
-    }, {thread_id, (size / 2) * thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -49,12 +50,12 @@ void* recv_thread(void* arg) {
     req_t req = {REQ_TYPE_NULL};
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        while (syncs[thread_id] == 0) continue;
+      while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
         if (touch_data) write_buffer(buf, msg_size, s_data);
         isend_tag(tx_ctx, buf, msg_size, addr, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) continue;
-    }, {thread_id, (size / 2) * thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -63,13 +64,15 @@ int main(int argc, char *argv[]) {
     if (argc > 1)
         tx_thread_num = atoi(argv[1]);
     if (argc > 2)
-        tx_thread_num = atoi(argv[2]);
+        rx_thread_num = atoi(argv[2]);
     if (argc > 3)
         min_size = atoi(argv[3]);
     if (argc > 4)
         max_size = atoi(argv[4]);
     if (argc > 5)
         touch_data = atoi(argv[5]);
+    if (argc > 6)
+        bind_prg_thread = atoi(argv[6]);
 
     if (tx_thread_num * 2 * max_size > HEAP_SIZE){
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, tx_thread_num * 2 * max_size);
@@ -109,7 +112,8 @@ int main(int argc, char *argv[]) {
           int core = 0;
           if (getenv("FB_SCORE"))
               core = atoi(getenv("FB_SCORE"));
-          comm_set_me_to(core + 2*id); // only for hyper-threaded. FIXME.
+          if (bind_prg_thread)
+              comm_set_me_to(core + 2*id); // only for hyper-threaded. FIXME.
 
           ctx_t& rx_ctx = rx_ctxs[id];
           req_t *reqs = (req_t*) calloc(tx_thread_num, sizeof(req_t));

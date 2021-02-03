@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
     if (argc > 1)
         tx_thread_num = atoi(argv[1]);
     if (argc > 2)
-        tx_thread_num = atoi(argv[2]);
+        rx_thread_num = atoi(argv[2]);
     if (argc > 3)
         min_size = atoi(argv[3]);
     if (argc > 4)
