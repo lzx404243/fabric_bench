@@ -9,6 +9,16 @@
 #include "config.hpp"
 #include "thread_utils.hpp"
 
+static inline void comm_init() {
+    MLOG_Init();
+    pmi_master_init();
+}
+
+static inline void comm_free() {
+    pmi_barrier();
+    pmi_finalize();
+}
+
 static inline double wtime()
 {
     timeval t1;
@@ -92,8 +102,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
         }
     }
 
-    omp::thread_barrier();
-    if (omp::thread_id() == 0) pmi_barrier();
     omp::thread_barrier();
 }
 

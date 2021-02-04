@@ -23,10 +23,14 @@ int main(int argc, char *argv[]) {
     if (argc > 1)
         thread_num = atoi(argv[1]);
 
+    comm_init();
     init_device(&device, thread_num != 1);
     rank = pmi_get_rank();
     size = pmi_get_size();
     omp::thread_run(hello_world, thread_num);
+
+    free_device(&device);
+    comm_free();
     return 0;
 }
 

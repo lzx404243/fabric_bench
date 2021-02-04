@@ -69,6 +69,7 @@ int main(int argc, char *argv[]) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * max_size);
         exit(1);
     }
+    comm_init();
     init_device(&device, thread_num != 1);
     rank = pmi_get_rank();
     size = pmi_get_size();
@@ -92,6 +93,16 @@ int main(int argc, char *argv[]) {
     } else {
         omp::thread_run(recv_thread, thread_num);
     }
+
+    for (int i = 0; i < thread_num; ++i) {
+        free_ctx(&ctxs[i]);
+        free_cq(&cqs[i]);
+    }
+    free_device(&device);
+    free(addrs);
+    free(ctxs);
+    free(cqs);
+    comm_free();
     return 0;
 }
 

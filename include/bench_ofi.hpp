@@ -65,8 +65,6 @@ struct req_t {
 const addr_t ADDR_ANY = {FI_ADDR_UNSPEC};
 
 static inline int init_device(device_t *device, bool thread_safe) {
-    MLOG_Init();
-    pmi_master_init();
     int comm_rank = pmi_get_rank();
     int comm_size = pmi_get_size();
     // Create hint.
@@ -83,6 +81,7 @@ static inline int init_device(device_t *device, bool thread_safe) {
 
     // Create info.
     FI_SAFECALL(fi_getinfo(FI_VERSION(1, 6), nullptr, nullptr, 0, hints, &device->info));
+    fi_freeinfo(hints);
 
     // Create libfabric obj.
     FI_SAFECALL(fi_fabric(device->info->fabric_attr, &device->fabric, nullptr));
@@ -105,6 +104,16 @@ static inline int init_device(device_t *device, bool thread_safe) {
     return FB_OK;
 }
 
+static inline int free_device(device_t *device) {
+    FI_SAFECALL(fi_close((fid_t) device->av));
+    FI_SAFECALL(fi_close((fid_t) device->heap_mr));
+    FI_SAFECALL(fi_close((fid_t) device->domain));
+    FI_SAFECALL(fi_close((fid_t) device->fabric));
+    fi_freeinfo(device->info);
+    free(device->heap_ptr);
+    return FB_OK;
+}
+
 static inline int init_cq(device_t device, cq_t* cq) {
     fi_cq_attr cq_attr {
             .size = CQ_SIZE,
@@ -114,12 +123,22 @@ static inline int init_cq(device_t device, cq_t* cq) {
     return FB_OK;
 }
 
+static inline int free_cq(cq_t* cq) {
+    FI_SAFECALL(fi_close((fid_t) cq->cq));
+    return FB_OK;
+}
+
 static inline int init_ctx(device_t *device, cq_t cq, ctx_t* ctx, uint64_t mode) {
     FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
     FI_SAFECALL(fi_enable(ctx->ep));
     ctx->device = device;
+    return FB_OK;
+}
+
+static inline int free_ctx(ctx_t* ctx) {
+    FI_SAFECALL(fi_close((fid_t) ctx->ep));
     return FB_OK;
 }
 
