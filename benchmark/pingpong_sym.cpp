@@ -1,4 +1,4 @@
-#include "bench_ofi.hpp"
+#include "bench_mpi.hpp"
 #include "comm_exp.hpp"
 #include "thread_utils.hpp"
 #include <iostream>
