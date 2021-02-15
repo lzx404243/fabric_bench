@@ -9,6 +9,7 @@
 #include "config.hpp"
 #include "thread_utils.hpp"
 
+namespace fb {
 static inline void comm_init() {
     MLOG_Init();
     pmi_master_init();
@@ -19,20 +20,19 @@ static inline void comm_free() {
     pmi_finalize();
 }
 
-static inline double wtime()
-{
+static inline double wtime() {
     timeval t1;
     gettimeofday(&t1, nullptr);
     return t1.tv_sec + t1.tv_usec / 1e6;
 }
 
-void write_buffer(char* buffer, int len, char input) {
+void write_buffer(char *buffer, int len, char input) {
     for (int i = 0; i < len; ++i) {
         buffer[i] = input;
     }
 }
 
-void check_buffer(const char* buffer, int len, char expect) {
+void check_buffer(const char *buffer, int len, char expect) {
     for (int i = 0; i < len; ++i) {
         if (buffer[i] != expect) {
             printf("check_buffer failed! buffer[%d](%d) != %d. ABORT!\n", i, buffer[i], expect);
@@ -41,26 +41,22 @@ void check_buffer(const char* buffer, int len, char expect) {
     }
 }
 
-static inline double get_latency(double time, double n_msg)
-{
+static inline double get_latency(double time, double n_msg) {
     return time / n_msg;
 }
 
-static inline double get_msgrate(double time, double n_msg)
-{
+static inline double get_msgrate(double time, double n_msg) {
     return n_msg / time;
 }
 
-static inline double get_bw(double time, size_t size, double n_msg)
-{
+static inline double get_bw(double time, size_t size, double n_msg) {
     return n_msg * size / time;
 }
 
 template<typename FUNC>
-static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
+static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
-                                FUNC&& f, std::pair<int, int>&& iter = {0, 1})
-{
+                                FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
     int loop = TOTAL;
     int skip = SKIP;
@@ -105,8 +101,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t>&& range,
     omp::thread_barrier();
 }
 
-inline int comm_set_me_to(int core_id)
-{
+inline int comm_set_me_to(int core_id) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(core_id, &cpuset);
@@ -114,4 +109,5 @@ inline int comm_set_me_to(int core_id)
     pthread_t current_thread = pthread_self();
     return pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
 }
+} // namespace fb
 #endif//FABRICBENCH_COMM_EXP_HPP

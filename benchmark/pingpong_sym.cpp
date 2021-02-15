@@ -1,7 +1,8 @@
-#include "bench_ofi.hpp"
-#include "comm_exp.hpp"
+#include "bench_fabric.hpp"
 #include "thread_utils.hpp"
-#include <iostream>
+#include "comm_exp.hpp"
+
+using namespace fb;
 
 int thread_num = 4;
 int min_size = 8;
@@ -80,7 +81,7 @@ int main(int argc, char *argv[]) {
     addrs = (addr_t*) calloc(thread_num, sizeof(addr_t));
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
-        init_ctx(&device, cqs[i], &ctxs[i], CTX_SEND | CTX_RECV);
+        init_ctx(&device, cqs[i], &ctxs[i], CTX_TX | CTX_RX);
         put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();

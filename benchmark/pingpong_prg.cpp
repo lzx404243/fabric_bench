@@ -1,10 +1,11 @@
-#include <iostream>
+#include "bench_fabric.hpp"
+#include "thread_utils.hpp"
+#include "comm_exp.hpp"
 #include <atomic>
 #include <thread>
 #include <vector>
-#include "bench_ofi.hpp"
-#include "comm_exp.hpp"
-#include "thread_utils.hpp"
+
+using namespace fb;
 
 int tx_thread_num = 3;
 int rx_thread_num = 1;
@@ -134,12 +135,12 @@ int main(int argc, char *argv[]) {
     addrs = (addr_t*) calloc(rx_thread_num, sizeof(addr_t));
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
-        init_ctx(&device, rx_cqs[i], &rx_ctxs[i], CTX_RECV);
+        init_ctx(&device, rx_cqs[i], &rx_ctxs[i], CTX_RX);
         put_ctx_addr(rx_ctxs[i], i);
     }
     for (int i = 0; i < tx_thread_num; ++i) {
         init_cq(device, &tx_cqs[i]);
-        init_ctx(&device, tx_cqs[i], &tx_ctxs[i], CTX_SEND);
+        init_ctx(&device, tx_cqs[i], &tx_ctxs[i], CTX_TX);
     }
     flush_ctx_addr();
     for (int i = 0; i < rx_thread_num; ++i) {

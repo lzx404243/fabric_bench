@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include "mlog.h"
 
-namespace omp {
+namespace fb::omp {
 
 typedef void* (*func_t)(void*);
 
@@ -38,5 +38,5 @@ static inline void thread_run(func_t f, int n)
     }
 }
 
-}
+} // namespace fb::omp
 #endif

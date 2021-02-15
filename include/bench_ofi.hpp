@@ -13,12 +13,6 @@
 #include <rdma/fi_errno.h>
 #include <rdma/fi_tagged.h>
 
-#include "config.hpp"
-#include "pmi_wrapper.h"
-#include "comm_exp.hpp"
-#include "mlog.h"
-
-
 #define FI_SAFECALL(x)                                                    \
   {                                                                       \
     int err = (x);                                                        \
@@ -31,10 +25,7 @@
   while (0)                                                               \
     ;                                                                     \
 
-enum ctx_mode_t {
-    CTX_SEND,
-    CTX_RECV
-};
+namespace fb {
 struct device_t {
     fi_info *info;
     fid_fabric *fabric;
@@ -53,13 +44,9 @@ struct ctx_t {
 struct addr_t {
     fi_addr_t addr;
 };
-enum req_type_t {
-    REQ_TYPE_NULL,
-    REQ_TYPE_PEND
-};
 struct req_t {
-    alignas(64) volatile req_type_t type; // change to atomic
-    char pad[64-sizeof(req_type_t)];
+    alignas(64) volatile req_type_t type;// change to atomic
+    char pad[64 - sizeof(req_type_t)];
 };
 
 const addr_t ADDR_ANY = {FI_ADDR_UNSPEC};
@@ -114,8 +101,8 @@ static inline int free_device(device_t *device) {
     return FB_OK;
 }
 
-static inline int init_cq(device_t device, cq_t* cq) {
-    fi_cq_attr cq_attr {
+static inline int init_cq(device_t device, cq_t *cq) {
+    fi_cq_attr cq_attr{
             .size = CQ_SIZE,
             .format = FI_CQ_FORMAT_CONTEXT,
     };
@@ -123,12 +110,12 @@ static inline int init_cq(device_t device, cq_t* cq) {
     return FB_OK;
 }
 
-static inline int free_cq(cq_t* cq) {
+static inline int free_cq(cq_t *cq) {
     FI_SAFECALL(fi_close((fid_t) cq->cq));
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t cq, ctx_t* ctx, uint64_t mode) {
+static inline int init_ctx(device_t *device, cq_t cq, ctx_t *ctx, uint64_t mode) {
     FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
@@ -137,7 +124,7 @@ static inline int init_ctx(device_t *device, cq_t cq, ctx_t* ctx, uint64_t mode)
     return FB_OK;
 }
 
-static inline int free_ctx(ctx_t* ctx) {
+static inline int free_ctx(ctx_t *ctx) {
     FI_SAFECALL(fi_close((fid_t) ctx->ep));
     return FB_OK;
 }
@@ -151,7 +138,7 @@ static inline int register_ctx_self(ctx_t ctx, addr_t *addr) {
     assert(addrlen <= 8 * EP_ADDR_LEN);
     FI_SAFECALL(fi_getname((fid_t) ctx.ep, my_addr, &addrlen));
 
-    int ret = fi_av_insert(ctx.device->av, (void *)my_addr, 1, &(addr->addr), 0, nullptr);
+    int ret = fi_av_insert(ctx.device->av, (void *) my_addr, 1, &(addr->addr), 0, nullptr);
     assert(ret == 1);
     return FB_OK;
 }
@@ -194,19 +181,18 @@ static inline int get_ctx_addr(device_t device, int rank, int id, addr_t *addr) 
     pmi_get(key, value);
     sscanf(value, PARSE_STRING,
            &peer_addr[0], &peer_addr[1], &peer_addr[2], &peer_addr[3], &peer_addr[4], &peer_addr[5]);
-    int ret = fi_av_insert(device.av, (void *)peer_addr, 1, &addr->addr, 0, nullptr);
+    int ret = fi_av_insert(device.av, (void *) peer_addr, 1, &addr->addr, 0, nullptr);
     assert(ret == 1);
     return FB_OK;
 }
 
-static inline bool progress(cq_t cq)
-{
+static inline bool progress(cq_t cq) {
     fi_cq_entry entry;
     fi_cq_err_entry error;
     ssize_t ret = fi_cq_read(cq.cq, &entry, 1);
     if (ret > 0) {
-        req_t* r = (req_t*) entry.op_context;
-        if ( r != NULL ) {
+        req_t *r = (req_t *) entry.op_context;
+        if (r != NULL) {
             r->type = REQ_TYPE_NULL;
             return true;
         }
@@ -220,10 +206,9 @@ static inline bool progress(cq_t cq)
     return false;
 }
 
-static inline void isend_tag(ctx_t ctx, void* src, size_t size, addr_t target, int tag, req_t* req)
-{
+static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
     req->type = REQ_TYPE_PEND;
-    void* desc = fi_mr_desc(ctx.device->heap_mr);
+    void *desc = fi_mr_desc(ctx.device->heap_mr);
     int ret;
     do {
         ret = fi_tsend(ctx.ep, src, size, desc, target.addr, tag, req);
@@ -231,15 +216,15 @@ static inline void isend_tag(ctx_t ctx, void* src, size_t size, addr_t target, i
     if (ret) FI_SAFECALL(ret);
 }
 
-static inline void irecv_tag(ctx_t ctx, void* src, size_t size, addr_t target, int tag, req_t* req)
-{
+static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req) {
     req->type = REQ_TYPE_PEND;
-    void* desc = fi_mr_desc(ctx.device->heap_mr);
+    void *desc = fi_mr_desc(ctx.device->heap_mr);
     int ret;
     do {
-        ret = fi_trecv(ctx.ep, src, size, desc, target.addr, tag, 0x0, req);
+        ret = fi_trecv(ctx.ep, src, size, desc, source.addr, tag, 0x0, req);
     } while (ret == -FI_EAGAIN);
     if (ret) FI_SAFECALL(ret);
 }
+} // namespace fb
 
 #endif//FABRICBENCH_BENCH_OFI_HPP

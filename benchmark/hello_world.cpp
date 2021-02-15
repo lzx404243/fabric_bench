@@ -1,8 +1,9 @@
-#include <iostream>
-#include "unistd.h"
-#include "bench_ofi.hpp"
-#include "comm_exp.hpp"
+#include "bench_fabric.hpp"
 #include "thread_utils.hpp"
+#include "comm_exp.hpp"
+#include "unistd.h"
+
+using namespace fb;
 
 int thread_num = 1;
 int rank, size;

@@ -1,5 +1,5 @@
 target_include_directories(pmi-obj PUBLIC include)
-target_sources(pmi-obj PRIVATE
+target_sources(pmi-obj PUBLIC
         client/pmi2_util.c
         client/pmi2_api.c
         client/pmi2_util.h
