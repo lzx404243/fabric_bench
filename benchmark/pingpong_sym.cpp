@@ -1,6 +1,9 @@
 #include "bench_fabric.hpp"
 #include "thread_utils.hpp"
 #include "comm_exp.hpp"
+// todo: remove this include before compiling. For now this include is meant for work around with a syntax highlighting issue
+
+#include "bench_ib.hpp"
 
 using namespace fb;
 
