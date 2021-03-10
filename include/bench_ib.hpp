@@ -3,9 +3,6 @@
 #include <infiniband/verbs.h>
 #include <stdio.h>
 #include <stdlib.h>
-// todo: remove this include before compiling. For now this include is meant for work around with a syntax highlighting issue
-#include "bench_fabric.hpp"
-#include "bench_ib_helper.hpp"
 
 namespace fb {
 
@@ -23,6 +20,9 @@ struct device_t {
 struct cq_t {
     ibv_cq *cq;
 };
+
+#include "bench_ib_helper.hpp"
+
 struct ctx_t {
     ibv_qp *qp;
     conn_info *local_conn_info;

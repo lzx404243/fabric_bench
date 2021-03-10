@@ -165,7 +165,7 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
 #ifdef FB_USE_OFI
 #include "bench_ofi.hpp"
 #endif
-#ifdef FB_USE_IB
+#ifdef FB_USE_IBV
 #include "bench_ib.hpp"
 #endif
 

@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.13)
 project(fabric_bench)
 
-set(FB_SERVER ofi CACHE STRING "Server: ofi MPI ibv")
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_CXX_STANDARD 17)
+
+include(CheckCSourceCompiles)
+check_c_source_compiles(
+    "
+        int f(void *restrict x);
+        int main(void) {return 0;}
+    "
+    HAVE_RESTRICT
+)
+
+set(FB_SERVER ibv CACHE STRING "Server: ofi MPI ibv")
 
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 
@@ -9,6 +21,11 @@ find_package(OpenMP REQUIRED)
 if("ofi" IN_LIST FB_SERVER)
     find_package(Fabric REQUIRED)
     set(FB_USE_OFI ON)
+endif()
+
+if("ibv" IN_LIST FB_SERVER)
+    find_package(Fabric REQUIRED)
+    set(FB_USE_IBV ON)
 endif()
 
 configure_file(include/config.hpp.in include/config.hpp @ONLY)
@@ -22,7 +39,7 @@ target_include_directories(fb_lib INTERFACE
 target_link_libraries(fb_lib INTERFACE
         mlog-obj
         pmi-obj
-        Fabric::OFI
+        Fabric::IBV
         OpenMP::OpenMP_CXX
 )
 

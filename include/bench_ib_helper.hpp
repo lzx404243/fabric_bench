@@ -13,7 +13,6 @@
     }                                                                       \
     while (0)                                                               \
         ;
-namespace fb {
 
 struct conn_info {
     // the following two fields are relevant only for rdma read/write, not send
@@ -125,5 +124,3 @@ static inline void qp_to_rts(struct ibv_qp *qp) {
         exit(EXIT_FAILURE);
     }
 }
-
-}// namespace fb
