@@ -18,6 +18,7 @@ ctx_t *ctxs;
 addr_t *addrs;
 
 void* send_thread(void* arg) {
+    printf("I am a send thread\n");
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
@@ -26,7 +27,7 @@ void* send_thread(void* arg) {
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
     req_t req = {REQ_TYPE_NULL};
-
+    printf("sending msg\n");
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       if (touch_data) write_buffer(buf, msg_size, s_data);
       isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
@@ -40,6 +41,7 @@ void* send_thread(void* arg) {
 }
 
 void* recv_thread(void* arg) {
+    printf("I am a recv thread\n");
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
@@ -48,6 +50,7 @@ void* recv_thread(void* arg) {
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
     req_t req = {REQ_TYPE_NULL};
+    printf("recving msg\n");
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
@@ -68,13 +71,18 @@ int main(int argc, char *argv[]) {
         min_size = atoi(argv[2]);
     if (argc > 3)
         max_size = atoi(argv[3]);
-
+    printf("got all arguments");
     if (thread_num * max_size > HEAP_SIZE){
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * max_size);
         exit(1);
     }
+    printf("calling comm_init\n");
     comm_init();
+    printf("comm inited\n");
+
     init_device(&device, thread_num != 1);
+    printf("device inited\n");
+
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
@@ -82,15 +90,20 @@ int main(int argc, char *argv[]) {
     cqs = (cq_t*) calloc(thread_num, sizeof(cq_t));
     ctxs = (ctx_t*) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t*) calloc(thread_num, sizeof(addr_t));
+    printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
+        printf("created cq\n");
         init_ctx(&device, cqs[i], &ctxs[i], CTX_TX | CTX_RX);
+        printf("ctx inited\n");
         put_ctx_addr(ctxs[i], i);
+        printf("done putting ctx addr\n");
     }
     flush_ctx_addr();
     for (int i = 0; i < thread_num; ++i) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
     }
+    printf("ctx address obtained\n");
 
     if (rank < size / 2) {
         omp::thread_run(send_thread, thread_num);
@@ -98,6 +111,7 @@ int main(int argc, char *argv[]) {
         omp::thread_run(recv_thread, thread_num);
     }
 
+    printf("Done: Freeing resources\n");
     for (int i = 0; i < thread_num; ++i) {
         free_ctx(&ctxs[i]);
         free_cq(&cqs[i]);

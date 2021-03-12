@@ -33,27 +33,45 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
 }
 
 static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
-    struct ibv_qp_init_attr qp_init_attr;
-    qp_init_attr.qp_context = 0;
-    qp_init_attr.send_cq = cq.cq;
-    qp_init_attr.recv_cq = cq.cq;
-    if (device->dev_srq) {
-        qp_init_attr.srq = device->dev_srq;
-    }
-    qp_init_attr.cap.max_send_wr = 256;//(uint32_t)dev_attr->max_qp_wr;
-    qp_init_attr.cap.max_recv_wr = 1;  //(uint32_t)dev_attr->max_qp_wr;
-    // -- this affect the size of (TODO:tune later).
-    qp_init_attr.cap.max_send_sge = 16;// this allows 128 inline.
-    qp_init_attr.cap.max_recv_sge = 1;
-    qp_init_attr.cap.max_inline_data = 0;
-    qp_init_attr.qp_type = IBV_QPT_RC;
-    qp_init_attr.sq_sig_all = 0;
+
+    // todo: investigate why the commented out code cause intermittant segfault...(Does it resolve by adding a scope)
+    // struct ibv_qp_init_attr qp_init_attr;
+    // printf("setting up qp init attr\n");
+    // //qp_init_attr.qp_context = 0;
+    // qp_init_attr.send_cq = cq.cq;
+    // qp_init_attr.recv_cq = cq.cq;
+
+    // printf("done setting up srq\n");
+    // qp_init_attr.cap.max_send_wr = 256;//(uint32_t)dev_attr->max_qp_wr;
+    // qp_init_attr.cap.max_recv_wr = 1;  //(uint32_t)dev_attr->max_qp_wr;
+    // // -- this affect the size of (TODO:tune later).
+    // qp_init_attr.cap.max_send_sge = 16;// this allows 128 inline.
+    // qp_init_attr.cap.max_recv_sge = 1;
+    // qp_init_attr.cap.max_inline_data = 0;
+    // qp_init_attr.qp_type = IBV_QPT_RC;
+    // qp_init_attr.sq_sig_all = 0;
+
+    {
+		struct ibv_qp_init_attr qp_init_attr = {
+			.send_cq = cq.cq,
+			.recv_cq = cq.cq,
+			.cap     = {
+				.max_send_wr  = 256,
+				.max_recv_wr  = 1,
+				.max_send_sge = 16,
+				.max_recv_sge = 1,
+                //.max_inline_data = 0
+			},
+			.qp_type = IBV_QPT_RC
+		};
+	
     struct ibv_qp *qp = ibv_create_qp(device->dev_pd, &qp_init_attr);
     if (!qp) {
         fprintf(stderr, "Unable to create queue pair\n");
         exit(EXIT_FAILURE);
     }
     return qp;
+    }
 }
 
 static inline void qp_init(struct ibv_qp *qp, int port) {
@@ -76,6 +94,7 @@ static inline void qp_init(struct ibv_qp *qp, int port) {
 static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
                              struct ibv_port_attr *port_attr,
                              struct conn_info *rctx_) {
+    printf("entering qp_to_rtr\n");
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
 
@@ -103,9 +122,13 @@ static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
         fprintf(stderr, "failed to modify QP state to RTR\n");
         exit(EXIT_FAILURE);
     }
+    printf("done - qp_to_rtr\n");
+
 }
 
 static inline void qp_to_rts(struct ibv_qp *qp) {
+    printf("entering qp_to_rts\n");
+
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
 
@@ -123,4 +146,5 @@ static inline void qp_to_rts(struct ibv_qp *qp) {
         fprintf(stderr, "failed to modify QP state to RTS\n");
         exit(EXIT_FAILURE);
     }
+    printf("Done - qp_to_rts\n");
 }
