@@ -126,7 +126,8 @@ static inline int free_device(device_t *device) {
 
 static inline int init_cq(device_t device, cq_t *cq) {
     // Same completion queue for send and recv work queues
-    cq->cq = ibv_create_cq(device.dev_ctx, 64 * 1024, 0, 0, 0);
+    // todo: second parameter changed to match perftest
+    cq->cq = ibv_create_cq(device.dev_ctx, 1, 0, 0, 0);
     if (cq->cq == 0) {
         printf("Error: Unable to create cq\n");
         exit(EXIT_FAILURE);

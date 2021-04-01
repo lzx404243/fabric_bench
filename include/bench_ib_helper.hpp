@@ -24,8 +24,7 @@ struct conn_info {
 };
 
 static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
-    int mr_flags =
-            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+    int mr_flags = IBV_ACCESS_LOCAL_WRITE;
     void *ptr = 0;
     // todo: check the following memory alignment
     posix_memalign(&ptr, 8192, size + 8192);
@@ -54,13 +53,14 @@ static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
     {
 		struct ibv_qp_init_attr qp_init_attr = {
 			.send_cq = cq.cq,
+            // todo: try using a different recv queue as perftest
 			.recv_cq = cq.cq,
 			.cap     = {
-				.max_send_wr  = 256,
-				.max_recv_wr  = 1,
-				.max_send_sge = 16,
+				.max_send_wr  = 1,
+				.max_recv_wr  = 512,
+				.max_send_sge = 1,
 				.max_recv_sge = 1,
-                //.max_inline_data = 0
+                .max_inline_data = 0
 			},
 			.qp_type = IBV_QPT_RC
 		};
@@ -80,8 +80,7 @@ static inline void qp_init(struct ibv_qp *qp, int port) {
     attr.qp_state = IBV_QPS_INIT;
     attr.port_num = port;
     attr.pkey_index = 0;
-    attr.qp_access_flags =
-            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+    attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     int flags =
             IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
     int rc = ibv_modify_qp(qp, &attr, flags);
@@ -115,7 +114,7 @@ static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
     attr.ah_attr.grh.sgid_index = 0;// gid
 
     int flags = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-                IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+                IBV_QP_RQ_PSN;
 
     int rc = ibv_modify_qp(qp, &attr, flags);
     if (rc != 0) {
