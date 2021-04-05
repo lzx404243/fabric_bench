@@ -23,6 +23,8 @@ void* send_thread(void* arg) {
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
     ctx_t& ctx = ctxs[thread_id];
+    // todo: zheli -- the following is a hack to specify the thread as a sending thread
+    ctx.mode = CTX_TX;
     char *buf = (char*) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -30,10 +32,15 @@ void* send_thread(void* arg) {
     printf("sending msg\n");
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
       if (touch_data) write_buffer(buf, msg_size, s_data);
-      isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-      while (req.type != REQ_TYPE_NULL) progress(cq);
+      // Post the first receive request before the first send
       irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-      while (req.type != REQ_TYPE_NULL) progress(cq);
+      isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+      // zli89: To test out things, the progress function would be blocking in ib impl. 
+      // The request type is not used, as only one possible work completion at anytime
+      // Todo: find a better way to do this
+      progress(cq);
+      //irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+      progress(cq);
       if (touch_data) check_buffer(buf, msg_size, r_data);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -46,6 +53,8 @@ void* recv_thread(void* arg) {
     int thread_count = omp::thread_count();
     cq_t& cq = cqs[thread_id];
     ctx_t& ctx = ctxs[thread_id];
+    ctx.mode = CTX_RX;
+
     char *buf = (char*) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -53,12 +62,18 @@ void* recv_thread(void* arg) {
     printf("recving msg\n");
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+      if (!ctx.first_recv_posted) {
+        // Post the first receive request
+        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+        ctx.first_recv_posted = true;
+      }
+      progress(cq);
+      // Immdediately post another receive request when the former one is completed
       irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-      while (req.type != REQ_TYPE_NULL) progress(cq);
       if (touch_data) check_buffer(buf, msg_size, r_data);
       if (touch_data) write_buffer(buf, msg_size, s_data);
       isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-      while (req.type != REQ_TYPE_NULL) progress(cq);
+      progress(cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;

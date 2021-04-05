@@ -27,6 +27,8 @@ struct ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
+    uint64_t mode;
+    bool first_recv_posted = false;
 };
 
 struct addr_t {
@@ -38,6 +40,10 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
+enum {
+	PINGPONG_RECV_WRID = 1,
+	PINGPONG_SEND_WRID = 2,
+};
 // todo: Wild card address not implemented. Relevant only on pingpong_prg though. Ignore for now
 //const addr_t ADDR_ANY = {};
 
@@ -216,8 +222,9 @@ static inline bool progress(cq_t cq) {
     // Success
     //printf("Completed work!\n");
 
-    req_t *req = (req_t *) wc.wr_id;
-    req->type = REQ_TYPE_NULL;
+    // todo: see if the following is required
+    auto req_type = (int) wc.wr_id;
+
     return true;
 }
 
@@ -239,7 +246,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
-            .wr_id = (uintptr_t) req,
+            .wr_id = PINGPONG_SEND_WRID,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -270,7 +277,7 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = (uintptr_t) req,
+            .wr_id = PINGPONG_RECV_WRID,
             .sg_list = &list,
             .num_sge = 1,
     };
