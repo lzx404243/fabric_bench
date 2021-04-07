@@ -71,14 +71,14 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         }
 
         for (int i = iter.first; i < skip; i += iter.second) {
-            f(msg_size, i, skip - 1);
+            f(msg_size, i, iter.first, skip - iter.second + iter.first);
         }
 
         omp::thread_barrier();
         t = wtime();
 
         for (int i = iter.first; i < loop; i += iter.second) {
-            f(msg_size, i, loop - 1);
+            f(msg_size, i, iter.first, loop - iter.second + iter.first);
         }
 
         omp::thread_barrier();
