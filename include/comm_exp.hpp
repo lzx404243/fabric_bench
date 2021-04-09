@@ -58,7 +58,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-    int loop = TOTAL;
+    int loop = TOTAL * 10;
     int skip = SKIP;
     long long state;
     long long count = 0;

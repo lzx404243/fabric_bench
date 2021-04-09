@@ -9,7 +9,7 @@ using namespace fb;
 
 int thread_num = 4;
 int min_size = 8;
-int max_size = 8192;
+int max_size = 262144;
 bool touch_data = false;
 int rank, size, target_rank;
 device_t device;
