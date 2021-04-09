@@ -62,16 +62,14 @@ void *recv_thread(void *arg) {
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
     req_t req = {REQ_TYPE_NULL};
-    constexpr int first_iter = 0;
 
     printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
            (rank % (size / 2) * thread_count + thread_id),
            ((size / 2) * thread_count));
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter, int start = -1, int last = -1) {
-        int last_iter = (msg_size >= LARGE) ? TOTAL_LARGE - 1 : TOTAL - 1;
 
-        if (iter == first_iter) {
+        if (iter == start) {
             // Post the first receive request
             irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
         }

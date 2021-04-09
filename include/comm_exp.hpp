@@ -75,12 +75,14 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         }
 
         omp::thread_barrier();
+        //pmi_barrier();
+
         t = wtime();
 
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i, iter.first, loop - iter.second + iter.first);
         }
-
+        //pmi_barrier();
         omp::thread_barrier();
         t = wtime() - t;
 
@@ -97,6 +99,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             fflush(stdout);
         }
     }
+    //pmi_barrier();
 
     omp::thread_barrier();
 }
