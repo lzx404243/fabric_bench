@@ -58,7 +58,7 @@ static inline int init_device(device_t *device, bool thread_safe) {
 
     // Use the last one by default.
     device->dev_ctx = ibv_open_device(dev_list[num_devices - 1]);
-
+    printf("Using device: %s", ibv_get_device_name(dev_list[num_devices - 1]));
     ibv_free_device_list(dev_list);
     int rc = 0;
     // Get device attribute
@@ -71,20 +71,22 @@ static inline int init_device(device_t *device, bool thread_safe) {
 
     // Find first available port?
     uint8_t dev_port = 0;
-
+    bool is_ib = false;
     for (; dev_port < 128; dev_port++) {
         printf("querying port attribute\n");
 
         rc = ibv_query_port(device->dev_ctx, dev_port, &device->port_attr);
-        if (rc == 0) break;
-    }
-    printf("Got port attribute\n");
-    device->dev_port = dev_port;
+        is_ib = device->port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND;
 
-    if (rc != 0) {
+        if (rc == 0 && is_ib) break;
+    }
+
+    if (rc != 0 || !is_ib) {
         fprintf(stderr, "Unable to query port\n");
         exit(EXIT_FAILURE);
     }
+    printf("Got port attribute\n");
+    device->dev_port = dev_port;
 
     device->dev_pd = ibv_alloc_pd(device->dev_ctx);
     if (device->dev_pd == 0) {
