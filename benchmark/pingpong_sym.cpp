@@ -16,6 +16,74 @@ device_t device;
 cq_t *cqs;
 ctx_t *ctxs;
 addr_t *addrs;
+int routs = 0;
+
+static void run_pingpong(int msg_size, int iters, ctx_t *ctx, cq_t &cq, char * buf, addr_t addr) {
+
+    int rcnt = 0;
+    int scnt = 0;
+    while (rcnt < iters || scnt < iters) {
+        {
+            struct ibv_wc wc[2];
+            int ne, i;
+            do {
+                ne = ibv_poll_cq(cq.cq, 2, wc);
+                if (ne < 0) {
+                    fprintf(stderr, "poll CQ failed %d\n", ne);
+                    exit(EXIT_FAILURE);
+                }
+
+            } while (ne < 1);
+
+            for (i = 0; i < ne; ++i) {
+                if (wc[i].status != IBV_WC_SUCCESS) {
+                    fprintf(stderr, "Failed status %s (%d) for wr_id %d\n",
+                            ibv_wc_status_str(wc[i].status),
+                            wc[i].status, (int) wc[i].wr_id);
+                    exit(EXIT_FAILURE);
+                }
+
+                switch ((int) wc[i].wr_id) {
+                    case PINGPONG_SEND_WRID:
+                        ++scnt;
+                        break;
+
+                    case PINGPONG_RECV_WRID:
+                        if (--routs == 0) {
+                            // routs += pp_post_recv(ctx, ctx->rx_depth - routs);
+                            // if (routs < ctx->rx_depth) {
+                            //     fprintf(stderr,
+                            //             "Couldn't post receive (%d)\n",
+                            //             routs);
+                            //     exit(EXIT_FAILURE);
+                            // }
+                            irecv_tag(*ctx, buf, msg_size, addr, 0, nullptr);
+
+                        }
+                        ++rcnt;
+                        break;
+
+                    default:
+                        fprintf(stderr, "Completion for unknown wr_id %d\n",
+                                (int) wc[i].wr_id);
+                        exit(EXIT_FAILURE);
+
+                }
+
+                ctx->pending &= ~(int) wc[i].wr_id;
+                if (scnt < iters && !ctx->pending) {
+                    // if (pp_post_send(ctx)) {
+                    //     fprintf(stderr, "Couldn't post send\n");
+                    //     exit(EXIT_FAILURE);
+                    // }
+                    isend_tag(*ctx, buf, msg_size, addr, 0, nullptr);
+                    ctx->pending = PINGPONG_RECV_WRID |
+                                   PINGPONG_SEND_WRID;
+                }
+            }
+        }
+    }
+}
 
 void *send_thread(void *arg) {
     printf("I am a send thread\n");
@@ -33,22 +101,18 @@ void *send_thread(void *arg) {
            (rank % (size / 2) * thread_count + thread_id),
            ((size / 2) * thread_count));
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter, int start = -1, int last = -1) {
-        if (touch_data) write_buffer(buf, msg_size, s_data);
-        // Post the first receive request before the first send
         irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+        routs++;
+        // This side also send the first message
         isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        // zli89: To test out things, the progress function would be blocking in ib impl.
-        // The request type is not used, as only one possible work completion at anytime
-        // Todo: find a better way to do this
-        progress(cq);
-        //irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        progress(cq);
-        if (touch_data) check_buffer(buf, msg_size, r_data);
+        ctx.pending = PINGPONG_RECV_WRID | PINGPONG_SEND_WRID;
+        run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
     },
                  {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
+
 
 void *recv_thread(void *arg) {
     printf("I am a recv thread\n");
@@ -68,21 +132,11 @@ void *recv_thread(void *arg) {
            ((size / 2) * thread_count));
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter, int start = -1, int last = -1) {
+        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+        routs++;
+        ctx.pending = PINGPONG_RECV_WRID;
+        run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
 
-        if (iter == start) {
-            // Post the first receive request
-            irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        }
-        progress(cq);
-        // Immdediately post another receive request when the former one is completed
-        if (iter != last) {
-            // Don't pre post a recv for last itereration...
-            irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        }
-        if (touch_data) check_buffer(buf, msg_size, r_data);
-        if (touch_data) write_buffer(buf, msg_size, s_data);
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        progress(cq);
     },
                  {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 

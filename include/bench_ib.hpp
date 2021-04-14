@@ -29,6 +29,8 @@ struct ctx_t {
     device_t *device = nullptr;
     uint64_t mode;
     bool first_recv_posted = false;
+    ibv_cq *cq;
+    int pending;
 };
 
 struct addr_t {
@@ -44,6 +46,7 @@ enum {
 	PINGPONG_RECV_WRID = 1,
 	PINGPONG_SEND_WRID = 2,
 };
+
 // todo: Wild card address not implemented. Relevant only on pingpong_prg though. Ignore for now
 //const addr_t ADDR_ANY = {};
 
