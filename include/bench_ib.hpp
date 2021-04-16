@@ -234,7 +234,7 @@ static inline bool progress(cq_t cq) {
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
     //printf("entering - isend_tag\n");
-    req->type = REQ_TYPE_PEND;
+    //req->type = REQ_TYPE_PEND;
     if (ctx.qp->state != IBV_QPS_RTS) {
         // todo: currently state transition happens here. Consider doing this earlier during the init phase
         // Same applies to irecv_tag
@@ -264,7 +264,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
 
 static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req) {
     //printf("entering - irecv_tag\n");
-    req->type = REQ_TYPE_PEND;
+    //req->type = REQ_TYPE_PEND;
 
     if (ctx.qp->state != IBV_QPS_RTS) {
         printf("Setting qp to correct state\n");
