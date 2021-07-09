@@ -263,7 +263,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
         send_flags |= IBV_SEND_INLINE;
     }
     struct ibv_sge list = {
-            .addr = (uintptr_t) ctx.device->heap_ptr,
+            .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
@@ -294,7 +294,7 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
 
     // proceed with normal recv here
     struct ibv_sge list = {
-            .addr = (uintptr_t) ctx.device->heap_ptr,
+            .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
