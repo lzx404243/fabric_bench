@@ -4,7 +4,9 @@
 // todo: remove this include before compiling. For now this include is meant for work around with a syntax highlighting issue
 
 #include "bench_ib.hpp"
+#define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
 
+#include <sched.h>
 using namespace fb;
 
 int thread_num = 4;
@@ -100,6 +102,8 @@ void *send_thread(void *arg) {
     //printf("I am a send thread\n");
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
+    int cpu_num = sched_getcpu();
+    fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
     cq_t &cq = cqs[thread_id];
     ctx_t &ctx = ctxs[thread_id];
     // todo: zheli -- the following is a hack to specify the thread as a sending thread

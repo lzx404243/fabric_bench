@@ -113,7 +113,6 @@ static inline int init_device(device_t *device, bool thread_safe) {
     //     fprintf(stderr, "Could not create shared received queue\n");
     //     exit(EXIT_FAILURE);
     // }
-    static int page_size = sysconf(_SC_PAGESIZE);
     // // Create RDMA memory.
     //device->heap_ptr = malloc(roundup(8, page_size));
     //memset(device->heap_ptr, 0x7b, 8);

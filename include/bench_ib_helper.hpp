@@ -28,11 +28,13 @@ struct conn_info {
 };
 
 static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
+    const int PAGE_SIZE = sysconf(_SC_PAGESIZE);
+
     int mr_flags =
             IBV_ACCESS_LOCAL_WRITE;
     void *ptr = 0;
     // todo: check the following memory alignment
-    posix_memalign(&ptr, 8192, size + 8192);
+    posix_memalign(&ptr, PAGE_SIZE, size);
     return ibv_reg_mr(device->dev_pd, ptr, size, mr_flags);
 }
 
