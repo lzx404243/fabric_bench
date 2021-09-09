@@ -29,9 +29,6 @@ struct ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
-    uint64_t mode;
-    bool first_recv_posted = false;
-    ibv_cq *cq;
     int pending;
 };
 
@@ -48,9 +45,6 @@ enum {
 	PINGPONG_RECV_WRID = 1,
 	PINGPONG_SEND_WRID = 2,
 };
-
-// todo: Wild card address not implemented. Relevant only on pingpong_prg though. Ignore for now
-//const addr_t ADDR_ANY = {};
 
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
@@ -101,23 +95,18 @@ static inline int init_device(device_t *device, bool thread_safe) {
     //printf("Allocated pd\n");
 
     // Create shared-receive queue, **number here affect performance**.
-    // todo: Decide whehter to use srq or not (currently not using srq)
     device->dev_srq = nullptr;
-    // struct ibv_srq_init_attr srq_attr;
-    // srq_attr.srq_context = 0;
-    // srq_attr.attr.max_wr = 64;
-    // srq_attr.attr.max_sge = 1;
-    // srq_attr.attr.srq_limit = 0;
-    //device->dev_srq = ibv_create_srq(device->dev_pd, &srq_attr);
-    // if (device->dev_srq == 0) {
-    //     fprintf(stderr, "Could not create shared received queue\n");
-    //     exit(EXIT_FAILURE);
-    // }
-    // // Create RDMA memory.
-    //device->heap_ptr = malloc(roundup(8, page_size));
-    //memset(device->heap_ptr, 0x7b, 8);
-
-    // todo: check the following memory alignment
+    struct ibv_srq_init_attr srq_attr;
+    srq_attr.srq_context = 0;
+    srq_attr.attr.max_wr = 64;
+    srq_attr.attr.max_sge = 1;
+    srq_attr.attr.srq_limit = 0;
+    device->dev_srq = ibv_create_srq(device->dev_pd, &srq_attr);
+    if (device->dev_srq == 0) {
+         fprintf(stderr, "Could not create shared received queue\n");
+         exit(EXIT_FAILURE);
+    }
+    // todo: look at LCI values for memory alignment
     //posix_memalign(&ptr, 8192, HEAP_SIZE + 8192);
     device->heap = ibv_mem_malloc(device, HEAP_SIZE);
     if (device->heap == 0) {
@@ -127,7 +116,6 @@ static inline int init_device(device_t *device, bool thread_safe) {
     device->heap_ptr = device->heap->addr;
     //printf("Allocated heap\n");
 
-    // todo: memory alignment(heap address)
     return FB_OK;
 }
 
@@ -156,9 +144,9 @@ static inline int free_cq(cq_t *cq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t cq, ctx_t *ctx, uint64_t mode) {
+static inline int init_ctx(device_t *device, cq_t cq, cq_t rx_cq, ctx_t *ctx) {
     // Create and initialize queue pair
-    ctx->qp = qp_create(device, cq);
+    ctx->qp = qp_create(device, cq, rx_cq);
     ctx->device = device;
     qp_init(ctx->qp, (int) device->dev_port);
 
@@ -212,7 +200,7 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline bool progress(cq_t cq) {
+static inline bool progress(cq_t cq, req_t * reqs) {
     //printf("entering - progress\n");
 
     struct ibv_wc wc;
@@ -234,20 +222,15 @@ static inline bool progress(cq_t cq) {
                wc.status);
         exit(EXIT_FAILURE);
     }
-    // Success
-    //printf("Completed work!\n");
-
-    // todo: see if the following is required
-    auto req_type = (int) wc.wr_id;
-
+    // Success, mark the corresponding request as completed
+    reqs[wc.wr_id].type = REQ_TYPE_NULL;
     return true;
 }
 
-static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
+static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
     //printf("entering - isend_tag\n");
     //req->type = REQ_TYPE_PEND;
     // if (ctx.qp->state == IBV_QPS_INIT) {
-    //     // todo: currently state transition happens here. Consider doing this earlier during the init phase
     //     // Same applies to irecv_tag
 
     //     // set qp to correct state(rts)
@@ -256,7 +239,9 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
     //     qp_to_rts(ctx.qp);
     // }
     //printf("Send: ready\n");
-    int send_flags = IBV_SEND_SIGNALED;
+    // todo: disable send signalling for now
+    //int send_flags = IBV_SEND_SIGNALED;
+    int send_flags = IBV_SEND_INLINE;
     // todo: zli89--remove hardcoded value(max inline size)
     if (size < PERFTEST_MAX_INLINE_SIZE) {
         send_flags |= IBV_SEND_INLINE;
@@ -266,21 +251,22 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
-            .wr_id = PINGPONG_SEND_WRID,
+            .wr_id = tag,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
             .send_flags = send_flags,
     };
     struct ibv_send_wr *bad_wr;
+
     IBV_SAFECALL(ibv_post_send(ctx.qp, &wr, &bad_wr));
-    //printf("Send: done\n");
+    printf("Send: posted\n");
     return;
 }
 
-static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req) {
+static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
     //printf("entering - irecv_tag\n");
-    //req->type = REQ_TYPE_PEND;
+    req->type = REQ_TYPE_PEND;
 
     // if (ctx.qp->state == IBV_QPS_INIT) {
     //     //printf("Setting qp to correct state\n");
@@ -297,7 +283,7 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = PINGPONG_RECV_WRID,
+            .wr_id = tag,
             .sg_list = &list,
             .num_sge = 1,
     };
@@ -306,5 +292,21 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
     //printf("Recv: done\n");
     return;
 }
+static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
+    struct ibv_sge list = {
+            .addr = (uintptr_t) src,
+            .length = size,
+            .lkey = device.heap->lkey};
+    struct ibv_recv_wr wr = {
+            .wr_id = PINGPONG_RECV_WRID,
+            .sg_list = &list,
+            .num_sge = 1,
+            };
+    struct ibv_recv_wr *bad_wr;
+    IBV_SAFECALL(ibv_post_srq_recv(device.dev_srq, &wr, &bad_wr));
+    printf("Recv: posted\n");
+    return;
+}
+
 
 }// namespace fb

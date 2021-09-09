@@ -57,7 +57,7 @@ static void run_pingpong(int msg_size, int iters, ctx_t *ctx, cq_t &cq, char * b
                         ++rcnt;
                         // zli89: don't post recv when we got enough messages
                         if ((rcnt + fb::rx_depth) <= iters) {
-                            irecv_tag(*ctx, buf, msg_size, addr, 0, nullptr);
+                            irecv_tag(*ctx, buf, msg_size, 0, nullptr);
                         }
                         // int additional_recv_cnt = fb::rx_depth - routs;
                         // for (int i = 0; i < additional_recv_cnt; i++) {
@@ -87,7 +87,7 @@ static void run_pingpong(int msg_size, int iters, ctx_t *ctx, cq_t &cq, char * b
                     //     exit(EXIT_FAILURE);
                     // }
                     //printf("I am %d, posting send\n", rank);
-                    isend_tag(*ctx, buf, msg_size, addr, 0, nullptr);
+                    isend_tag(*ctx, buf, msg_size, 0, nullptr);
                     //printf("I am %d, done posting send\n", rank);
 
                     ctx->pending = PINGPONG_RECV_WRID |
@@ -120,11 +120,11 @@ void *send_thread(void *arg) {
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         for (int i = 0; i < fb::rx_depth; i++) {
-            irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+            irecv_tag(ctx, buf, msg_size, thread_id, &req);
             routs++;
         }
         // This side also send the first message
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
+        isend_tag(ctx, buf, msg_size, thread_id, &req);
         ctx.pending = PINGPONG_RECV_WRID | PINGPONG_SEND_WRID;
 
         run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
@@ -156,12 +156,11 @@ void *recv_thread(void *arg) {
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         for (int i = 0; i < fb::rx_depth; i++) {
-            irecv_tag(ctx, buf, msg_size, addrs[thread_id], 0, nullptr);
+            irecv_tag(ctx, buf, msg_size, 0, nullptr);
             routs++;
         }
         ctx.pending = PINGPONG_RECV_WRID;
         run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
-
     },
                  {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
