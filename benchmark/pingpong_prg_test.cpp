@@ -156,7 +156,6 @@ void *recv_thread(void *arg) {
      printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
             (rank % (size / 2) * thread_count + thread_id),
             ((size / 2) * thread_count));
-    printf("Setting qp to correct state");
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         while (syncs[thread_id] == 0) continue;

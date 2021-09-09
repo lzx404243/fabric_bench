@@ -6,7 +6,7 @@
 #define PERFTEST_MAX_INLINE_SIZE 236
 
 // todo: specify rx_depth
-int rx_depth = 2;
+int rx_depth = 100;
 
 #define IBV_SAFECALL(x)                                                     \
     {                                                                       \

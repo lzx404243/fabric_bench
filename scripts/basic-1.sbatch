@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=eng-research
+#SBATCH --partition=secondary
 #SBATCH --time=05:00
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8

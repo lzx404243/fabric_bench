@@ -222,6 +222,11 @@ static inline bool progress(cq_t cq, req_t * reqs) {
                wc.status);
         exit(EXIT_FAILURE);
     }
+    if (wc.wr_id == 1000) {
+        printf("Send still sending completion!\n");
+    } else {
+        printf("receive for thread %d completed!\n" , wc.wr_id);
+    }
     // Success, mark the corresponding request as completed
     reqs[wc.wr_id].type = REQ_TYPE_NULL;
     return true;
@@ -246,12 +251,13 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     if (size < PERFTEST_MAX_INLINE_SIZE) {
         send_flags |= IBV_SEND_INLINE;
     }
+    // todo: removed hard-coded wr_id of 1000
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
-            .wr_id = tag,
+            .wr_id = 1000,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -260,51 +266,51 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     struct ibv_send_wr *bad_wr;
 
     IBV_SAFECALL(ibv_post_send(ctx.qp, &wr, &bad_wr));
-    printf("Send: posted\n");
+    printf("Send: posted(rank %d)\n", pmi_get_rank());
     return;
 }
 
-static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
-    //printf("entering - irecv_tag\n");
-    req->type = REQ_TYPE_PEND;
-
-    // if (ctx.qp->state == IBV_QPS_INIT) {
-    //     //printf("Setting qp to correct state\n");
-
-    //     // set qp to correct state(rts)
-    //     qp_to_rtr(ctx.qp, ctx.device->dev_port, &ctx.device->port_attr, &source.remote_conn_info);
-    //     qp_to_rts(ctx.qp);
-    // }
-    //printf("Recv: ready\n");
-
-    // proceed with normal recv here
-    struct ibv_sge list = {
-            .addr = (uintptr_t) src,
-            .length = size,
-            .lkey = ctx.device->heap->lkey};
-    struct ibv_recv_wr wr = {
-            .wr_id = tag,
-            .sg_list = &list,
-            .num_sge = 1,
-    };
-    struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_recv(ctx.qp, &wr, &bad_wr));
-    //printf("Recv: done\n");
-    return;
-}
+//static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
+//    //printf("entering - irecv_tag\n");
+//    req->type = REQ_TYPE_PEND;
+//
+//    // if (ctx.qp->state == IBV_QPS_INIT) {
+//    //     //printf("Setting qp to correct state\n");
+//
+//    //     // set qp to correct state(rts)
+//    //     qp_to_rtr(ctx.qp, ctx.device->dev_port, &ctx.device->port_attr, &source.remote_conn_info);
+//    //     qp_to_rts(ctx.qp);
+//    // }
+//    //printf("Recv: ready\n");
+//
+//    // proceed with normal recv here
+//    struct ibv_sge list = {
+//            .addr = (uintptr_t) src,
+//            .length = size,
+//            .lkey = ctx.device->heap->lkey};
+//    struct ibv_recv_wr wr = {
+//            .wr_id = tag,
+//            .sg_list = &list,
+//            .num_sge = 1,
+//    };
+//    struct ibv_recv_wr *bad_wr;
+//    IBV_SAFECALL(ibv_post_recv(ctx.qp, &wr, &bad_wr));
+//    //printf("Recv: done\n");
+//    return;
+//}
 static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
             .lkey = device.heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = PINGPONG_RECV_WRID,
+            .wr_id = tag,
             .sg_list = &list,
             .num_sge = 1,
             };
     struct ibv_recv_wr *bad_wr;
     IBV_SAFECALL(ibv_post_srq_recv(device.dev_srq, &wr, &bad_wr));
-    printf("Recv: posted\n");
+    printf("Recv: posted(rank %d)\n", pmi_get_rank());
     return;
 }
 
