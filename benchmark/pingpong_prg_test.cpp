@@ -123,7 +123,7 @@ void *send_thread(void *arg) {
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        // todo: currently no polling for send. Think about it(also in recv thread)
+        while (req.type != REQ_TYPE_NULL) continue;
         while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
         printf("worker thread got msg from progress thread!\n");
@@ -161,6 +161,7 @@ void *recv_thread(void *arg) {
         while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
+        while (req.type != REQ_TYPE_NULL) continue;
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 //    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
 //        for (int i = 0; i < fb::rx_depth; i++) {
@@ -199,9 +200,9 @@ void progress_thread(int id) {
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
-        // progress each send completion -- currently skipped
-//        for (int j = id; j < thread_num; j += rx_thread_num)
-//            progress(cqs[j]);
+        // progress each send completion
+        for (int j = id; j < thread_num; j += rx_thread_num)
+            progress(cqs[j], nullptr);
         // Progress the receives
         bool ret = progress(rx_cqs[id], reqs);
         if (ret) {

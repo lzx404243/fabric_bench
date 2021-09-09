@@ -222,19 +222,23 @@ static inline bool progress(cq_t cq, req_t * reqs) {
                wc.status);
         exit(EXIT_FAILURE);
     }
-    if (wc.wr_id == 1000) {
-        printf("Send still sending completion!\n");
-    } else {
-        printf("receive for thread %d completed!\n" , wc.wr_id);
-    }
+
+    printf("receive for thread %d completed!\n" , wc.wr_id);
+
     // Success, mark the corresponding request as completed
-    reqs[wc.wr_id].type = REQ_TYPE_NULL;
+    if (reqs) {
+        reqs[wc.wr_id].type = REQ_TYPE_NULL;
+    } else {
+        // todo: remove the hack to progressing send
+        req_t *r = (req_t *)wc.wr_id;
+        r->type = REQ_TYPE_NULL;
+    }
     return true;
 }
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
     //printf("entering - isend_tag\n");
-    //req->type = REQ_TYPE_PEND;
+    req->type = REQ_TYPE_PEND;
     // if (ctx.qp->state == IBV_QPS_INIT) {
     //     // Same applies to irecv_tag
 
@@ -245,8 +249,8 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     // }
     //printf("Send: ready\n");
     // todo: disable send signalling for now
-    //int send_flags = IBV_SEND_SIGNALED;
-    int send_flags = IBV_SEND_INLINE;
+    int send_flags = IBV_SEND_SIGNALED;
+    //int send_flags = IBV_SEND_INLINE;
     // todo: zli89--remove hardcoded value(max inline size)
     if (size < PERFTEST_MAX_INLINE_SIZE) {
         send_flags |= IBV_SEND_INLINE;
@@ -257,7 +261,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
-            .wr_id = 1000,
+            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,

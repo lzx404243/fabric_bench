@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=secondary
+#SBATCH --partition=cs
 #SBATCH --time=05:00
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
