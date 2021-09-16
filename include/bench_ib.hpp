@@ -89,16 +89,16 @@ static inline int init_device(device_t *device, bool thread_safe) {
 
     // Create shared-receive queue, **number here affect performance**.
     device->dev_srq = nullptr;
-    struct ibv_srq_init_attr srq_attr;
-    srq_attr.srq_context = 0;
-    srq_attr.attr.max_wr = 64;
-    srq_attr.attr.max_sge = 1;
-    srq_attr.attr.srq_limit = 0;
-    device->dev_srq = ibv_create_srq(device->dev_pd, &srq_attr);
-    if (device->dev_srq == 0) {
-         fprintf(stderr, "Could not create shared received queue\n");
-         exit(EXIT_FAILURE);
-    }
+//    struct ibv_srq_init_attr srq_attr;
+//    srq_attr.srq_context = 0;
+//    srq_attr.attr.max_wr = 64;
+//    srq_attr.attr.max_sge = 1;
+//    srq_attr.attr.srq_limit = 0;
+//    device->dev_srq = ibv_create_srq(device->dev_pd, &srq_attr);
+//    if (device->dev_srq == 0) {
+//         fprintf(stderr, "Could not create shared received queue\n");
+//         exit(EXIT_FAILURE);
+//    }
     // todo: look at LCI values for memory alignment
     //posix_memalign(&ptr, 8192, HEAP_SIZE + 8192);
     device->heap = ibv_mem_malloc(device, HEAP_SIZE);
@@ -134,9 +134,9 @@ static inline int free_cq(cq_t *cq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t cq, cq_t rx_cq, ctx_t *ctx) {
+static inline int init_ctx(device_t *device, cq_t cq, ctx_t *ctx) {
     // Create and initialize queue pair
-    ctx->qp = qp_create(device, cq, rx_cq);
+    ctx->qp = qp_create(device, cq);
     ctx->device = device;
     qp_init(ctx->qp, (int) device->dev_port);
 
@@ -212,6 +212,9 @@ static inline bool progress(cq_t cq, req_t * reqs) {
     } else {
         // todo: remove the hack to progressing send
         req_t *r = (req_t *)wc.wr_id;
+        if (!r) {
+            return false;
+        }
         r->type = REQ_TYPE_NULL;
     }
     return true;
@@ -230,7 +233,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
             .lkey = ctx.device->heap->lkey};
 
     struct ibv_send_wr wr = {
-            .wr_id = (uintptr_t)req,
+            .wr_id = (uintptr_t)nullptr,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -243,22 +246,51 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     return;
 }
 
-static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
+static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
+    //printf("entering - irecv_tag\n");
+    req->type = REQ_TYPE_PEND;
+
+    // if (ctx.qp->state == IBV_QPS_INIT) {
+    //     //printf("Setting qp to correct state\n");
+
+    //     // set qp to correct state(rts)
+    //     qp_to_rtr(ctx.qp, ctx.device->dev_port, &ctx.device->port_attr, &source.remote_conn_info);
+    //     qp_to_rts(ctx.qp);
+    // }
+    //printf("Recv: ready\n");
+
+    // proceed with normal recv here
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
-            .lkey = device.heap->lkey};
-
+            .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = tag,
+            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
-            };
+    };
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(device.dev_srq, &wr, &bad_wr));
-    //printf("Recv: posted(rank %d)\n", pmi_get_rank());
+    IBV_SAFECALL(ibv_post_recv(ctx.qp, &wr, &bad_wr));
+    //printf("Recv: done\n");
     return;
 }
+
+//static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
+//    struct ibv_sge list = {
+//            .addr = (uintptr_t) src,
+//            .length = size,
+//            .lkey = device.heap->lkey};
+//
+//    struct ibv_recv_wr wr = {
+//            .wr_id = tag,
+//            .sg_list = &list,
+//            .num_sge = 1,
+//            };
+//    struct ibv_recv_wr *bad_wr;
+//    IBV_SAFECALL(ibv_post_srq_recv(device.dev_srq, &wr, &bad_wr));
+//    //printf("Recv: posted(rank %d)\n", pmi_get_rank());
+//    return;
+//}
 
 
 }// namespace fb

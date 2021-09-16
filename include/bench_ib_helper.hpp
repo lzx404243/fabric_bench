@@ -6,7 +6,7 @@
 #define PERFTEST_MAX_INLINE_SIZE 236
 
 // todo: specify rx_depth
-int rx_depth = 8;
+int rx_depth = 1;
 
 #define IBV_SAFECALL(x)                                                     \
     {                                                                       \
@@ -35,12 +35,12 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
     return ibv_reg_mr(device->dev_pd, ptr, size, mr_flags);
 }
 
-static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq) {
+static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
     // todo: use LCI parameter for the below
     {
 		struct ibv_qp_init_attr qp_init_attr = {
 			.send_cq = cq.cq,
-			.recv_cq = rx_cq.cq,
+			.recv_cq = cq.cq,
 			.srq     = device->dev_srq ? device->dev_srq : nullptr,
 			.cap     = {
 				.max_send_wr  = 1,
