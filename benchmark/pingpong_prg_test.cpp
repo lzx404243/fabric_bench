@@ -30,84 +30,6 @@ int routs = 0;
 // todo: currently progress thread number is set to one
 constexpr int rx_thread_num = 1;
 
-static void run_pingpong(int msg_size, int iters, ctx_t *ctx, cq_t &cq, char * buf, addr_t addr) {
-    //printf("Entering run_pingpong\n");
-    int rcnt = 0;
-    int scnt = 0;
-    while (rcnt < iters || scnt < iters) {
-        {
-            struct ibv_wc wc[2];
-            int ne, i;
-            do {
-                ne = ibv_poll_cq(cq.cq, 2, wc);
-                if (ne < 0) {
-                    fprintf(stderr, "poll CQ failed %d\n", ne);
-                    exit(EXIT_FAILURE);
-                }
-
-            } while (ne < 1);
-            //printf("I am %d, Done polling\n", rank);
-
-            for (i = 0; i < ne; ++i) {
-                if (wc[i].status != IBV_WC_SUCCESS) {
-                    fprintf(stderr, "Failed status %s (%d) for wr_id %d\n",
-                            ibv_wc_status_str(wc[i].status),
-                            wc[i].status, (int) wc[i].wr_id);
-                    exit(EXIT_FAILURE);
-                }
-
-                switch ((int) wc[i].wr_id) {
-                    case PINGPONG_SEND_WRID:
-                        //printf("I am %d, completed one send\n", rank);
-                        ++scnt;
-                        break;
-
-                        case PINGPONG_RECV_WRID:
-                            //printf("I am %d, completed one recv\n", rank);
-                            ++rcnt;
-                            // zli89: don't post recv when we got enough messages
-                            if ((rcnt + fb::rx_depth) <= iters) {
-                                irecv_tag_srq(device, buf, msg_size, 0, nullptr);
-                            }
-                            // int additional_recv_cnt = fb::rx_depth - routs;
-                            // for (int i = 0; i < additional_recv_cnt; i++) {
-                            //     if ((rcnt + routs) == iters) {
-                            //         break;
-                            //     }
-                            //     irecv_tag(*ctx, buf, msg_size, addr, 0, nullptr);
-                            //     routs++;
-                            // }
-                            //printf("I am %d, done posting recv\n", rank);
-                            break;
-
-                            default:
-                                fprintf(stderr, "Completion for unknown wr_id %d\n",
-                                        (int) wc[i].wr_id);
-                                exit(EXIT_FAILURE);
-
-                }
-                //printf("Unsetting pending - %d \n", rank);
-
-                ctx->pending &= ~(int) wc[i].wr_id;
-                //printf("Done Unsetting pending - %d \n", rank);
-
-                if (scnt < iters && !ctx->pending) {
-                    // if (pp_post_send(ctx)) {
-                    //     fprintf(stderr, "Couldn't post send\n");
-                    //     exit(EXIT_FAILURE);
-                    // }
-                    //printf("I am %d, posting send\n", rank);
-                    isend_tag(*ctx, buf, msg_size, 0, nullptr);
-                    //printf("I am %d, done posting send\n", rank);
-
-                    ctx->pending = PINGPONG_RECV_WRID |
-                            PINGPONG_SEND_WRID;
-                }
-            }
-        }
-    }
-}
-
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
     int thread_id = omp::thread_id();
@@ -120,27 +42,18 @@ void *send_thread(void *arg) {
      printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
             (rank % (size / 2) * thread_count + thread_id),
             ((size / 2) * thread_count));
-
+    int count = 0;
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+//        if (++count % 2000 == 0) {
+//            printf("rank %d, unblocked! iter: %d\n", rank, iter);
+//        }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
+        //printf("rank %d, sent msg. waiting for progress thread to unblock. Req address: %p\n", rank, (void*)&req);
         while (req.type != REQ_TYPE_NULL) continue;
         while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
-        printf("worker thread got msg from progress thread!\n");
+        //printf("worker thread got msg from progress thread!\n");
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
-
-//    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-//        for (int i = 0; i < fb::rx_depth; i++) {
-//            irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-//            routs++;
-//        }
-//        // This side also send the first message
-//        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-//        ctx.pending = PINGPONG_RECV_WRID | PINGPONG_SEND_WRID;
-//
-//        run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
-//        },
-//                 {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -163,16 +76,6 @@ void *recv_thread(void *arg) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) continue;
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
-//    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-//        for (int i = 0; i < fb::rx_depth; i++) {
-//            irecv_tag(ctx, buf, msg_size, addrs[thread_id], 0, nullptr);
-//            routs++;
-//        }
-//        ctx.pending = PINGPONG_RECV_WRID;
-//        run_pingpong(msg_size, iter, &ctx, cq, buf, addrs[thread_id]);
-//
-//        },
-//                 {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
 }
@@ -190,7 +93,6 @@ void progress_thread(int id) {
     for (int i = id; i < thread_num; i += rx_thread_num) {
         connect_ctx(ctxs[i], addrs[i]);
     }
-    printf("connected all qps in prg\n");
     req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
@@ -234,12 +136,8 @@ int main(int argc, char *argv[]) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
         exit(1);
     }
-    //printf("calling comm_init\n");
     comm_init();
-    //printf("comm inited\n");
-
     init_device(&device, thread_num != 1);
-    //printf("device inited\n");
 
     rank = pmi_get_rank();
     size = pmi_get_size();
@@ -252,7 +150,6 @@ int main(int argc, char *argv[]) {
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
     // Receive completion queues(per workers)
     rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
-    //printf("init per thread structures\n");
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
@@ -288,7 +185,6 @@ int main(int argc, char *argv[]) {
     for (int id = 0; id < rx_thread_num; id++) {
         threads[id].join();
     }
-    //printf("Done: Freeing resources\n");
     // todo: fix resource cleanup error
     for (int i = 0; i < thread_num; ++i) {
         free_ctx(&ctxs[i]);
