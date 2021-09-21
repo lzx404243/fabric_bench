@@ -26,9 +26,7 @@ std::atomic<int> *syncs; // TODO： fix false sharing
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 
-int routs = 0;
-// todo: currently progress thread number is set to one
-constexpr int rx_thread_num = 1;
+int rx_thread_num = 1;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -44,15 +42,15 @@ void *send_thread(void *arg) {
             ((size / 2) * thread_count));
     int count = 0;
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-//        if (++count % 2000 == 0) {
-//            printf("rank %d, unblocked! iter: %d\n", rank, iter);
+//        if (rank == 0 && ++count % 2 == 0) {
 //        }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        //printf("rank %d, sent msg. waiting for progress thread to unblock. Req address: %p\n", rank, (void*)&req);
+        printf("rank %d, sent msg. waiting for progress thread to unblock. thread: %d\n", rank, thread_id);
         while (req.type != REQ_TYPE_NULL) continue;
+        printf("rank %d, unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
         while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
-        //printf("worker thread got msg from progress thread!\n");
+        printf("worker thread got msg from progress thread!\n");
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -71,10 +69,13 @@ void *recv_thread(void *arg) {
             ((size / 2) * thread_count));
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+        printf("rank %d, waiting for progress thread to unblock recv. - thread: %d\n", rank, thread_id);
         while (syncs[thread_id] == 0) continue;
         syncs[thread_id] = 0;
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
+        printf("rank %d, sent msg. waiting for progress thread to unblock. thread: %d\n", rank, thread_id);
         while (req.type != REQ_TYPE_NULL) continue;
+        printf("rank %d, unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -86,19 +87,30 @@ void progress_thread(int id) {
     // todo: progress thread binding
 //    if (getenv("FB_SCORE"))
 //        core = atoi(getenv("FB_SCORE"));
-//    if (bind_prg_thread)
-//        comm_set_me_to(core + 2*id); // only for hyper-threaded. FIXME.
+    bool bind_prg_thread = true;
+    if (bind_prg_thread) {
+        // todo: currently bind to cpu 6; fix this when testing multiple progress thread
+        auto err = comm_set_me_to(6);
+        if (err) {
+            errno = err;
+            printf("setting progress threa affinity failed: error %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    }
 
     // Put the queue pairs to the correct states
     for (int i = id; i < thread_num; i += rx_thread_num) {
         connect_ctx(ctxs[i], addrs[i]);
     }
+    int cpu_num = sched_getcpu();
+    fprintf(stderr, "progress Thread is running on CPU %3d\n",  cpu_num);
     req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
         irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
     }
+    printf("progress thread id: %d\n", id);
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
@@ -118,19 +130,21 @@ void progress_thread(int id) {
                 }
             }
         }
+        // todo: remove this if every thread is on its own core
         if (spin-- == 0) { sched_yield(); spin = 64; }
     }
     free(reqs);
 }
 
 int main(int argc, char *argv[]) {
-    // todo: input args might need to change
     if (argc > 1)
         thread_num = atoi(argv[1]);
     if (argc > 2)
-        min_size = atoi(argv[2]);
+        rx_thread_num = atoi(argv[2]);
     if (argc > 3)
-        max_size = atoi(argv[3]);
+        min_size = atoi(argv[3]);
+    if (argc > 4)
+        max_size = atoi(argv[4]);
     //printf("got all arguments");
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
@@ -142,13 +156,12 @@ int main(int argc, char *argv[]) {
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
-
     // Send completion queues(per workers)
     cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
     // Send context (per workers)
     ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
-    // Receive completion queues(per workers)
+    // Receive completion queues(per progress thread)
     rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
@@ -169,7 +182,6 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < thread_num; ++i) {
         syncs[i] = 0;
     }
-    // todo: ask Jiakun why this is not using OpenMP)
     std::vector<std::thread> threads(rx_thread_num);
     for (int id = 0; id < rx_thread_num; id++) {
         threads[id] = std::thread(progress_thread, id);
