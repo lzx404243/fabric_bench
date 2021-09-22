@@ -47,9 +47,9 @@ void *send_thread(void *arg) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         printf("rank %d, sent msg. waiting for progress thread to unblock. thread: %d\n", rank, thread_id);
         while (req.type != REQ_TYPE_NULL) continue;
-        printf("rank %d, unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
+        printf("rank %d, send unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
         while (syncs[thread_id] == 0) continue;
-        syncs[thread_id] = 0;
+        --syncs[thread_id];
         printf("worker thread got msg from progress thread!\n");
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -63,6 +63,8 @@ void *recv_thread(void *arg) {
     ctx_t &ctx = ctxs[thread_id];
     char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
     req_t req = {REQ_TYPE_NULL};
+    int cpu_num = sched_getcpu();
+    fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
 
      printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
             (rank % (size / 2) * thread_count + thread_id),
@@ -71,11 +73,12 @@ void *recv_thread(void *arg) {
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         printf("rank %d, waiting for progress thread to unblock recv. - thread: %d\n", rank, thread_id);
         while (syncs[thread_id] == 0) continue;
-        syncs[thread_id] = 0;
+        printf("rank %d, recv unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
+        --syncs[thread_id];
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         printf("rank %d, sent msg. waiting for progress thread to unblock. thread: %d\n", rank, thread_id);
         while (req.type != REQ_TYPE_NULL) continue;
-        printf("rank %d, unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
+        printf("rank %d, send unblocked! iter: %d -- thread: %d\n", rank, iter, thread_id);
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -88,6 +91,7 @@ void progress_thread(int id) {
 //    if (getenv("FB_SCORE"))
 //        core = atoi(getenv("FB_SCORE"));
     bool bind_prg_thread = true;
+    std::vector<int> recv_count(rx_thread_num);
     if (bind_prg_thread) {
         // todo: currently bind to cpu 6; fix this when testing multiple progress thread
         auto err = comm_set_me_to(6);
@@ -123,9 +127,19 @@ void progress_thread(int id) {
             for (int i = id; i < thread_num; i += rx_thread_num) {
                 // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
-                    syncs[i] = 1;
-                    char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-                    irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
+                    printf("(progress thread) completed recv from rank %d - thread: %d \n", pmi_get_rank(), i);
+                    // todo: the following shows the cause of deadlock and is observed in testing. Fixed
+//                    if (syncs[i] == 1) {
+//                        printf("(progress thread) found that previous recv hasn't been completed! %d - thread: %d \n", pmi_get_rank(), i);
+//                        exit(5);
+//                    }
+                    ++syncs[i];
+                    // todo: Don't post receive when the thread receives enough; not working; investigate why
+                    if (++recv_count[i] < 10000 / rx_thread_num) {
+                        char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
+                        irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
+                    }
+                    // todo: why breaking here? would this be the cause for the deadlock? shouldn't break as this isn't p2p
                     break;
                 }
             }
