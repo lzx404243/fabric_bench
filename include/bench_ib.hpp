@@ -41,11 +41,6 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
-enum {
-	PINGPONG_RECV_WRID = 1,
-	PINGPONG_SEND_WRID = 2,
-};
-
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
     // Get the list of devices
@@ -209,12 +204,10 @@ static inline bool progress(cq_t cq, req_t * reqs) {
     // Success, mark the corresponding request as completed
     if (reqs) {
         reqs[wc.wr_id].type = REQ_TYPE_NULL;
-        printf("completed recv from rank %d - thread: %d\n", pmi_get_rank(), wc.wr_id);
     } else {
         // todo: remove the hack to progressing send
         req_t *r = (req_t *)wc.wr_id;
         r->type = REQ_TYPE_NULL;
-        printf("completed send from rank %d\n", pmi_get_rank());
     }
     return true;
 }
@@ -246,7 +239,6 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
 }
 
 static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
-    req->type = REQ_TYPE_PEND;
 
     struct ibv_sge list = {
             .addr = (uintptr_t) src,

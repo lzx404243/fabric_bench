@@ -58,11 +58,11 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-//    int loop = TOTAL;
-//    int skip = SKIP;
+    int loop = TOTAL;
+    int skip = SKIP;
     // todo: iteration is reduced to speed up debugging. Change this back
-    int loop = 10000;
-    int skip = 0;
+//    int loop = 10000;
+//    int skip = 0;
 
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
         if (msg_size >= LARGE) {
@@ -81,10 +81,9 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             f(msg_size, i);
         }
         //pmi_barrier();
-        printf("rank %d, thread %d is done!\n", omp::thread_id(), pmi_get_rank());
         omp::thread_barrier();
         t = wtime() - t;
-        printf("all ranks done!\n");
+        //printf("all ranks done!\n");
 
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
