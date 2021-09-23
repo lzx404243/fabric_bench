@@ -239,7 +239,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
 }
 
 static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, req_t *req) {
-
+    req->type = REQ_TYPE_PEND;
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,

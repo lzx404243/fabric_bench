@@ -81,10 +81,19 @@ void progress_thread(int id) {
 //    if (getenv("FB_SCORE"))
 //        core = atoi(getenv("FB_SCORE"));
     bool bind_prg_thread = true;
+    // todo: modify the following for more than one progress thread
+    // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
+    auto total_messages = TOTAL + SKIP;
+    auto msg_count = total_messages / thread_num;
+    auto remainder = total_messages % thread_num;
+    //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
+    for (int i = 0; i < thread_num; i++) {
+        thread_recv_count[i] = (i < remainder) ? msg_count + 1 : msg_count;
+    }
 
     if (bind_prg_thread) {
-        // todo: currently bind to cpu 6; fix this when testing multiple progress thread
+        // todo: currently bind to cpu 18; fix this when testing multiple progress thread
         auto err = comm_set_me_to(18);
         if (err) {
             errno = err;
@@ -117,20 +126,20 @@ void progress_thread(int id) {
             for (int i = id; i < thread_num; i += rx_thread_num) {
                 // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
-                    // todo: the following shows the cause of deadlock and is observed in testing. Fixed
                     reqs[i].type = REQ_TYPE_PEND;
+                    // the following shows the cause of deadlock and is observed in testing. Fixed
 //                    if (syncs[i] == 1) {
 //                        printf("(progress thread) found that previous recv hasn't been completed! %d - thread: %d \n", pmi_get_rank(), i);
 //                        exit(5);
 //                    }
                     ++syncs[i];
                     // When each worker thread receives enough, don't post receive for this thread
-                    if (++thread_recv_count[i] < ((TOTAL + SKIP) / thread_num)) {
+                    if (--thread_recv_count[i] > 0) {
                         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
                         irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
                     }
                     // todo: why breaking here? would removing it improve/decrease performance?
-                    break;
+                    //break;
                 }
             }
         }
