@@ -35,13 +35,14 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
     return ibv_reg_mr(device->dev_pd, ptr, size, mr_flags);
 }
 
-static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq) {
+static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq, srq_t srq) {
     // todo: use LCI parameter for the below
+    // todo: modify srq assignemnt below to account for the case where srq isn't used
     {
 		struct ibv_qp_init_attr qp_init_attr = {
 			.send_cq = cq.cq,
 			.recv_cq = rx_cq.cq,
-			.srq     = device->dev_srq ? device->dev_srq : nullptr,
+			.srq     = srq.srq,
 			.cap     = {
 				.max_send_wr  = 1,
 				.max_recv_wr  = rx_depth,

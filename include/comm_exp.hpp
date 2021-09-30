@@ -61,7 +61,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 //    int loop = TOTAL;
 //    int skip = SKIP;
 
-    int loop = TOTAL;
+    int loop = 2000;//TOTAL;
     int skip = 0;
     // todo: iteration is reduced to speed up debugging. Change this back
 

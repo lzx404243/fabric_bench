@@ -21,6 +21,7 @@ cq_t *cqs;
 cq_t *rx_cqs;
 ctx_t *ctxs;
 addr_t *addrs;
+srq_t * srqs;
 
 std::atomic<int> *syncs; // TODO： fix false sharing
 std::atomic<bool> thread_stop = {false};
@@ -84,7 +85,7 @@ void progress_thread(int id) {
     // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
-    auto total_messages = TOTAL;// + SKIP;
+    auto total_messages = 2000;//TOTAL;// + SKIP;
     auto msg_count = total_messages / thread_num;
     auto remainder = total_messages % thread_num;
     //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
@@ -94,7 +95,7 @@ void progress_thread(int id) {
 
     if (bind_prg_thread) {
         // todo: currently bind to cpu 18; fix this when testing multiple progress thread
-        auto err = comm_set_me_to(17 + id);
+        auto err = comm_set_me_to(12 + id);
         if (err) {
             errno = err;
             printf("setting progress thread affinity failed: error %s\n", strerror(errno));
@@ -112,7 +113,7 @@ void progress_thread(int id) {
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
+        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
     }
     // Mark the thread as started
     thread_started++;
@@ -127,7 +128,7 @@ void progress_thread(int id) {
                 // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
                     reqs[i].type = REQ_TYPE_PEND;
-                    //printf("rank %d, thread %d remaining message to preocess: %d\n", pmi_get_rank(), i, thread_recv_count[i]);
+                    //printf("I am progress thread %d, rank %d, thread %d remaining message to process: %d\n", id, pmi_get_rank(), i, thread_recv_count[i]);
                     // the following shows the cause of deadlock and is observed in testing. Fixed
 //                    if (syncs[i] == 1) {
 //                        printf("(progress thread) found that previous recv hasn't been completed! %d - thread: %d \n", pmi_get_rank(), i);
@@ -137,7 +138,7 @@ void progress_thread(int id) {
                     // When each worker thread receives enough, don't post receive for this thread
                     if (--thread_recv_count[i] > 0) {
                         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-                        irecv_tag_srq(device, buf, max_size, i, &reqs[i]);
+                        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
                     }
                     // todo: why breaking here? would removing it improve/decrease performance?
                     //break;
@@ -177,15 +178,21 @@ int main(int argc, char *argv[]) {
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
     // Receive completion queues(per progress thread)
     rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
+    // Shared receive queues queues(per progress thread)
+    srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
     }
+    for (int i = 0; i < rx_thread_num; ++i) {
+        init_srq(device, &srqs[i]);
+    }
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
-        init_ctx(&device, cqs[i], rx_cqs[i % rx_thread_num], &ctxs[i]);
+        init_ctx(&device, cqs[i], rx_cqs[i % rx_thread_num], &ctxs[i], srqs[i % rx_thread_num]);
         put_ctx_addr(ctxs[i], i);
     }
+
     flush_ctx_addr();
     for (int i = 0; i < thread_num; ++i) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
