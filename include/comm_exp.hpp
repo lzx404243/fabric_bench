@@ -62,7 +62,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 //    int skip = SKIP;
 
     int loop = TOTAL;
-    int skip = SKIP;
+    int skip = 0;
     // todo: iteration is reduced to speed up debugging. Change this back
 
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {

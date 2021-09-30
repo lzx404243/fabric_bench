@@ -84,7 +84,7 @@ void progress_thread(int id) {
     // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
-    auto total_messages = TOTAL + SKIP;
+    auto total_messages = TOTAL;// + SKIP;
     auto msg_count = total_messages / thread_num;
     auto remainder = total_messages % thread_num;
     //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
@@ -94,7 +94,7 @@ void progress_thread(int id) {
 
     if (bind_prg_thread) {
         // todo: currently bind to cpu 18; fix this when testing multiple progress thread
-        auto err = comm_set_me_to(18);
+        auto err = comm_set_me_to(17 + id);
         if (err) {
             errno = err;
             printf("setting progress thread affinity failed: error %s\n", strerror(errno));
@@ -127,6 +127,7 @@ void progress_thread(int id) {
                 // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
                     reqs[i].type = REQ_TYPE_PEND;
+                    //printf("rank %d, thread %d remaining message to preocess: %d\n", pmi_get_rank(), i, thread_recv_count[i]);
                     // the following shows the cause of deadlock and is observed in testing. Fixed
 //                    if (syncs[i] == 1) {
 //                        printf("(progress thread) found that previous recv hasn't been completed! %d - thread: %d \n", pmi_get_rank(), i);
