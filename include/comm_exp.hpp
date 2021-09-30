@@ -83,7 +83,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         //pmi_barrier();
         omp::thread_barrier();
         t = wtime() - t;
-        printf("done sending message!\n");
+        //printf("done sending message!\n");
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
@@ -92,7 +92,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             char output_str[256];
             int used = 0;
             used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f",
-                             msg_size, latency, msgrate, bw);
+                             omp::thread_count(), latency, msgrate, bw);
             printf("%s\n", output_str);
             fflush(stdout);
         }
