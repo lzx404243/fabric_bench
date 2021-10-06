@@ -85,7 +85,7 @@ void progress_thread(int id) {
     // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
-    auto total_messages = 2000;//TOTAL;// + SKIP;
+    auto total_messages = TOTAL;// + SKIP;
     auto msg_count = total_messages / thread_num;
     auto remainder = total_messages % thread_num;
     //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
@@ -94,8 +94,8 @@ void progress_thread(int id) {
     }
 
     if (bind_prg_thread) {
-        // todo: currently bind to cpu 18; fix this when testing multiple progress thread
-        auto err = comm_set_me_to(12 + id);
+        // todo: currently bind to cpu 15; fix this when testing multiple progress thread
+        auto err = comm_set_me_to(63 + id);
         if (err) {
             errno = err;
             printf("setting progress thread affinity failed: error %s\n", strerror(errno));

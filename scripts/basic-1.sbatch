@@ -2,7 +2,7 @@
 #SBATCH --partition=compute
 #SBATCH --time=15:00
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=32
+#SBATCH --ntasks-per-node=16
 #SBATCH --account=uic193
 ##SBATCH --exclusive
 #SBATCH --job-name=basic
@@ -21,7 +21,7 @@ path_to_exe=${1:-/home/zli89/clion_fb/cmake-build-debug/benchmark}
 export OMP_PLACES=cores
 
 echo "srun -n 2 pingpong_prg_test(1 worker, 1 prg)"
-srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_prg_test 1 1 8 8
+srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_sym_optimized 1 8 8
 
 echo "srun -n 2 pingpong_prg_test(2 worker, 1 prg)"
 srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_prg_test 2 1 8 8
