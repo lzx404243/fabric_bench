@@ -169,6 +169,8 @@ void *recv_thread(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
+    fprintf(stderr, "pingpong_sym from summer TOTAL+skip");
+
     if (argc > 1)
         thread_num = atoi(argv[1]);
     if (argc > 2)

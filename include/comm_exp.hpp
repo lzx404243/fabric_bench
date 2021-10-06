@@ -58,7 +58,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-    int loop = TOTAL * 10;
+    int loop = TOTAL;
     int skip = SKIP;
     long long state;
     long long count = 0;
@@ -96,7 +96,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             char output_str[256];
             int used = 0;
             used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f",
-                             msg_size, latency, msgrate, bw);
+                             omp::thread_count(), latency, msgrate, bw);
             printf("%s\n", output_str);
             fflush(stdout);
         }
