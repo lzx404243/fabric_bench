@@ -5,7 +5,9 @@
 #include <atomic>
 #include <vector>
 #include <thread>
+#include <boost/tokenizer.hpp>
 
+using namespace boost;
 #define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
 
 #include <sched.h>
@@ -28,6 +30,7 @@ std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 
 int rx_thread_num = 1;
+std::vector<int> prg_thread_bindings;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -77,10 +80,6 @@ void *recv_thread(void *arg) {
 
 void progress_thread(int id) {
     int spin = 64;
-    int core = 0;
-    // todo: progress thread binding
-//    if (getenv("FB_SCORE"))
-//        core = atoi(getenv("FB_SCORE"));
     bool bind_prg_thread = true;
     // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
@@ -94,8 +93,8 @@ void progress_thread(int id) {
     }
 
     if (bind_prg_thread) {
-        // todo: currently bind to cpu 15; fix this when testing multiple progress thread
-        auto err = comm_set_me_to(63 + id);
+        // bind progress thread to core using the input binding specification if available
+        auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
         if (err) {
             errno = err;
             printf("setting progress thread affinity failed: error %s\n", strerror(errno));
@@ -160,6 +159,20 @@ int main(int argc, char *argv[]) {
         min_size = atoi(argv[3]);
     if (argc > 4)
         max_size = atoi(argv[4]);
+    if (argc > 5) {
+        // comma-seperated list to specify the thread each progressive thread is going to bind to
+        std::string core_list(argv[5]);
+        char_separator<char> sep(",");
+        tokenizer<char_separator<char>> tokens(core_list, sep);
+        for (auto t : tokens) {
+            prg_thread_bindings.push_back(std::stoi(t));
+        }
+        // make sure the number of bindings equal to the number of progress thread
+        if (prg_thread_bindings.size() != rx_thread_num) {
+            fprintf(stderr, "number of binding specification doesn't match the number of progress thread.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
     //printf("got all arguments");
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
