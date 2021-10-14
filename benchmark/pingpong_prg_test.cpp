@@ -144,8 +144,6 @@ void progress_thread(int id) {
                 }
             }
         }
-        // todo: remove this if every thread is on its own core
-        if (spin-- == 0) { sched_yield(); spin = 64; }
     }
     free(reqs);
 }
