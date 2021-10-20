@@ -4,6 +4,7 @@
 #include "bench_ib.hpp"
 #include <atomic>
 #include <vector>
+#include <unordered_map>
 #include <thread>
 #include <boost/tokenizer.hpp>
 
@@ -84,6 +85,7 @@ void progress_thread(int id) {
     // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
+    std::unordered_map<req_t*, int> reqToWorkerNum;
     auto total_messages = TOTAL;// + SKIP;
     auto msg_count = total_messages / thread_num;
     auto remainder = total_messages % thread_num;
@@ -109,6 +111,10 @@ void progress_thread(int id) {
     int cpu_num = sched_getcpu();
     fprintf(stderr, "progress Thread is running on CPU %3d\n",  cpu_num);
     req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
+    // Construct request-thread_num mapping for fast lookup
+    for (int i = id; i < thread_num; i += rx_thread_num) {
+        reqToWorkerNum[&reqs[i]] = i;
+    }
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
@@ -118,24 +124,22 @@ void progress_thread(int id) {
     thread_started++;
     while (!thread_stop.load()) {
         // progress each send completion
-        for (int j = id; j < thread_num; j += rx_thread_num)
-            progress(cqs[j], nullptr);
+        for (int j = id; j < thread_num; j += rx_thread_num) {
+            auto* send_req = progress_new(cqs[j]);
+            if (send_req) {
+                send_req->type = REQ_TYPE_NULL;
+            }
+        }
         // Progress the receives
-        bool ret = progress(rx_cqs[id], reqs);
-        if (ret) {
-            for (int i = id; i < thread_num; i += rx_thread_num) {
-                // zli89: when the progress thread receives certain message
-                if (reqs[i].type == REQ_TYPE_NULL) {
-                    reqs[i].type = REQ_TYPE_PEND;
-                    ++syncs[i];
-                    // When each worker thread receives enough, don't post receive for this thread
-                    if (--thread_recv_count[i] > 0) {
-                        char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-                        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
-                    }
-                    // todo: why breaking here? would removing it improve/decrease performance?
-                    //break;
-                }
+        auto* recv_req = progress_new(rx_cqs[id]);
+        if (recv_req) {
+            // zli89: when the progress thread receives certain message
+            int worker_num = reqToWorkerNum[recv_req];
+            ++syncs[worker_num];
+            // When each worker thread receives enough, don't post receive for this thread
+            if (--thread_recv_count[worker_num] > 0) {
+                char *buf = (char*) device.heap_ptr + (2 * worker_num + 1) * max_size;
+                irecv_tag_srq(device, buf, max_size, worker_num, &reqs[worker_num], &srqs[id]);
             }
         }
     }

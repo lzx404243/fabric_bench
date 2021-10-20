@@ -187,7 +187,7 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline bool progress(cq_t cq, req_t * reqs) {
+static inline req_t* progress_new(cq_t cq) {
     struct ibv_wc wc;
     int result;
     //printf("polling cq\n");
@@ -200,7 +200,7 @@ static inline bool progress(cq_t cq, req_t * reqs) {
     }
     // No completion event
     if (result == 0) {
-        return false;
+        return nullptr;
     }
     if (wc.status != ibv_wc_status::IBV_WC_SUCCESS) {
         printf("Error: Failed status %s (%d)\n",
@@ -208,18 +208,8 @@ static inline bool progress(cq_t cq, req_t * reqs) {
                wc.status);
         exit(EXIT_FAILURE);
     }
-
-    // Success, mark the corresponding request as completed
-    if (reqs) {
-        reqs[wc.wr_id].type = REQ_TYPE_NULL;
-        //printf("recv completed: for worker thread: %d, rank %d\n", wc.wr_id, pmi_get_rank());
-    } else {
-        // todo: remove the hack to progressing send
-        req_t *r = (req_t *)wc.wr_id;
-        r->type = REQ_TYPE_NULL;
-        //printf("send completed\n");
-    }
-    return true;
+    // Success, return the wr_id(the request pointer)
+    return (req_t *)wc.wr_id;
 }
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
@@ -286,7 +276,7 @@ static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int t
             .lkey = device.heap->lkey};
 
     struct ibv_recv_wr wr = {
-            .wr_id = tag,
+            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
             };
