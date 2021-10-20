@@ -28,8 +28,8 @@ srq_t * srqs;
 std::atomic<int> *syncs; // TODO： fix false sharing
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
-
 int rx_thread_num = 1;
+
 std::vector<int> prg_thread_bindings;
 
 void *send_thread(void *arg) {
@@ -127,12 +127,6 @@ void progress_thread(int id) {
                 // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
                     reqs[i].type = REQ_TYPE_PEND;
-                    //printf("I am progress thread %d, rank %d, thread %d remaining message to process: %d\n", id, pmi_get_rank(), i, thread_recv_count[i]);
-                    // the following shows the cause of deadlock and is observed in testing. Fixed
-//                    if (syncs[i] == 1) {
-//                        printf("(progress thread) found that previous recv hasn't been completed! %d - thread: %d \n", pmi_get_rank(), i);
-//                        exit(5);
-//                    }
                     ++syncs[i];
                     // When each worker thread receives enough, don't post receive for this thread
                     if (--thread_recv_count[i] > 0) {

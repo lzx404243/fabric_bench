@@ -9,6 +9,8 @@
 #include "config.hpp"
 #include "thread_utils.hpp"
 
+extern int rx_thread_num;
+
 namespace fb {
 static inline void comm_init() {
     MLOG_Init();
@@ -97,7 +99,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             int used = 0;
             // output is modified to show the worker thread
             used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f",
-                             omp::thread_count(), latency, msgrate, bw);
+                             omp::thread_count() + rx_thread_num, latency, msgrate, bw);
             printf("%s\n", output_str);
             fflush(stdout);
         }
