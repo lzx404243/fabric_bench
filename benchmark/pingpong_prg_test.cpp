@@ -26,7 +26,12 @@ ctx_t *ctxs;
 addr_t *addrs;
 srq_t * srqs;
 
-std::atomic<int> *syncs; // TODO： fix false sharing
+struct sync_t {
+    alignas(64) volatile std::atomic<int> sync;
+    char pad[64 - sizeof(std::atomic<int>)];
+};
+
+sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 int rx_thread_num = 1;
@@ -56,8 +61,8 @@ void *send_thread(void *arg) {
                 send_req->type = REQ_TYPE_NULL;
             }
         }
-        while (syncs[thread_id] == 0) continue;
-        --syncs[thread_id];
+        while (syncs[thread_id].sync == 0) continue;
+        --syncs[thread_id].sync;
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -78,8 +83,8 @@ void *recv_thread(void *arg) {
 //            ((size / 2) * thread_count));
 
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        while (syncs[thread_id] == 0) continue;
-        --syncs[thread_id];
+        while (syncs[thread_id].sync == 0) continue;
+        --syncs[thread_id].sync;
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
             //  progress for send completion
@@ -141,7 +146,7 @@ void progress_thread(int id) {
         if (recv_req) {
             // zli89: when the progress thread receives certain message
             int worker_num = reqToWorkerNum[recv_req];
-            ++syncs[worker_num];
+            ++syncs[worker_num].sync;
             // When each worker thread receives enough, don't post receive for this thread
             if (--thread_recv_count[worker_num] > 0) {
                 char *buf = (char*) device.heap_ptr + (2 * worker_num + 1) * max_size;
@@ -214,9 +219,9 @@ int main(int argc, char *argv[]) {
     }
 
     // atomic flag(per worker) used by the progress thread to signal that the worker can read from the receive buf
-    syncs = (std::atomic<int>*) calloc(thread_num, sizeof(std::atomic<int>));
+    syncs = (sync_t*) calloc(thread_num, sizeof(sync_t));
     for (int i = 0; i < thread_num; ++i) {
-        syncs[i] = 0;
+        syncs[i].sync = 0;
     }
     std::vector<std::thread> threads(rx_thread_num);
     for (int id = 0; id < rx_thread_num; id++) {
