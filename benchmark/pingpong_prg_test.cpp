@@ -41,6 +41,7 @@ void *send_thread(void *arg) {
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
     ctx_t &ctx = ctxs[thread_id];
     char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
+    auto& cq = cqs[thread_id];
     req_t req = {REQ_TYPE_NULL};
 //     printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
 //            (rank % (size / 2) * thread_count + thread_id),
@@ -48,7 +49,13 @@ void *send_thread(void *arg) {
     int count = 0;
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) continue;
+        while (req.type != REQ_TYPE_NULL) {
+            //  progress for send completion
+            auto* send_req = progress_new(cq);
+            if (send_req) {
+                send_req->type = REQ_TYPE_NULL;
+            }
+        }
         while (syncs[thread_id] == 0) continue;
         --syncs[thread_id];
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
@@ -63,6 +70,7 @@ void *recv_thread(void *arg) {
     char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
     req_t req = {REQ_TYPE_NULL};
     int cpu_num = sched_getcpu();
+    auto& cq = cqs[thread_id];
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
 
 //     printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
@@ -73,7 +81,13 @@ void *recv_thread(void *arg) {
         while (syncs[thread_id] == 0) continue;
         --syncs[thread_id];
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) continue;
+        while (req.type != REQ_TYPE_NULL) {
+            //  progress for send completion
+            auto* send_req = progress_new(cq);
+            if (send_req) {
+                send_req->type = REQ_TYPE_NULL;
+            }
+        }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -82,7 +96,6 @@ void *recv_thread(void *arg) {
 void progress_thread(int id) {
     int spin = 64;
     bool bind_prg_thread = true;
-    // todo: modify the following for more than one progress thread
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
     std::unordered_map<req_t*, int> reqToWorkerNum;
@@ -123,13 +136,6 @@ void progress_thread(int id) {
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
-        // progress each send completion
-        for (int j = id; j < thread_num; j += rx_thread_num) {
-            auto* send_req = progress_new(cqs[j]);
-            if (send_req) {
-                send_req->type = REQ_TYPE_NULL;
-            }
-        }
         // Progress the receives
         auto* recv_req = progress_new(rx_cqs[id]);
         if (recv_req) {
