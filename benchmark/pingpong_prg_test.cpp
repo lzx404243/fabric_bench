@@ -56,9 +56,13 @@ void *send_thread(void *arg) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
             //  progress for send completion
-            auto* send_req = progress_new(cq);
-            if (send_req) {
-                send_req->type = REQ_TYPE_NULL;
+            auto send_reqs = progress_new(cq);
+            if (send_reqs.size() > 1) {
+                printf("more than one send is progressed\n");
+                exit(EXIT_FAILURE);
+            }
+            for (int i = 0; i < send_reqs.size(); i++) {
+                send_reqs[i]->type = REQ_TYPE_NULL;
             }
         }
         while (syncs[thread_id].sync == 0) continue;
@@ -88,9 +92,13 @@ void *recv_thread(void *arg) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
             //  progress for send completion
-            auto* send_req = progress_new(cq);
-            if (send_req) {
-                send_req->type = REQ_TYPE_NULL;
+            auto send_reqs = progress_new(cq);
+            if (send_reqs.size() > 1) {
+                printf("more than one send is progressed\n");
+                exit(EXIT_FAILURE);
+            }
+            for (int i = 0; i < send_reqs.size(); i++) {
+                send_reqs[i]->type = REQ_TYPE_NULL;
             }
         }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
@@ -142,10 +150,10 @@ void progress_thread(int id) {
     thread_started++;
     while (!thread_stop.load()) {
         // Progress the receives
-        auto* recv_req = progress_new(rx_cqs[id]);
-        if (recv_req) {
+        auto recv_reqs = progress_new(rx_cqs[id]);
+        for (int i = 0; i < recv_reqs.size(); i++) {
             // zli89: when the progress thread receives certain message
-            int worker_num = reqToWorkerNum[recv_req];
+            int worker_num = reqToWorkerNum[recv_reqs[i]];
             ++syncs[worker_num].sync;
             // When each worker thread receives enough, don't post receive for this thread
             if (--thread_recv_count[worker_num] > 0) {

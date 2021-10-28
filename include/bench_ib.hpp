@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/param.h>
+#include <vector>
 
 namespace fb {
 
@@ -43,6 +44,8 @@ struct req_t {
     alignas(64) volatile req_type_t type;// change to atomic
     char pad[64 - sizeof(req_type_t)];
 };
+
+constexpr int max_cqe_per_poll = 10;
 
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
@@ -187,12 +190,13 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline req_t* progress_new(cq_t cq) {
-    struct ibv_wc wc;
+static inline std::vector<req_t*> progress_new(cq_t cq) {
+    struct ibv_wc wc[max_cqe_per_poll];
     int result;
+    std::vector<req_t*> completed_reqs;
     //printf("polling cq\n");
 
-    result = ibv_poll_cq(cq.cq, 1, &wc);
+    result = ibv_poll_cq(cq.cq, max_cqe_per_poll, wc);
 
     if (result < 0) {
         printf("Error: ibv_poll_cq() failed\n");
@@ -200,16 +204,20 @@ static inline req_t* progress_new(cq_t cq) {
     }
     // No completion event
     if (result == 0) {
-        return nullptr;
+        return {};
     }
-    if (wc.status != ibv_wc_status::IBV_WC_SUCCESS) {
-        printf("Error: Failed status %s (%d)\n",
-               ibv_wc_status_str(wc.status),
-               wc.status);
-        exit(EXIT_FAILURE);
+    for (int i = 0; i < result; i++) {
+        if (wc[i].status != ibv_wc_status::IBV_WC_SUCCESS) {
+            printf("Error: Failed status %s (%d)\n",
+                   ibv_wc_status_str(wc[i].status),
+                   wc[i].status);
+            exit(EXIT_FAILURE);
+        }
+        // Success, add the wr_id to returned vector
+        completed_reqs.push_back((req_t *)wc[i].wr_id);
     }
-    // Success, return the wr_id(the request pointer)
-    return (req_t *)wc.wr_id;
+    return completed_reqs;
+
 }
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
