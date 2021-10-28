@@ -98,47 +98,21 @@ void *recv_thread(void *arg) {
     return nullptr;
 }
 
-void progress_thread(int id) {
-    int spin = 64;
-    bool bind_prg_thread = true;
-    // Each worker thread is receiving a fix number of messages
+void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, int>& reqToWorkerNum) {
+    // real iteration
+    // Each worker thread is receiving a fixed number of messages
     std::vector<int> thread_recv_count(thread_num);
-    std::unordered_map<req_t*, int> reqToWorkerNum;
-    auto total_messages = SKIP;
-    auto msg_count = total_messages / thread_num;
-    auto remainder = total_messages % thread_num;
-    //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
+    auto msg_count = iter / thread_num;
+    auto remainder = iter % thread_num;
+    auto finished_worker = 0;
     for (int i = 0; i < thread_num; i++) {
         thread_recv_count[i] = (i < remainder) ? msg_count + 1 : msg_count;
-    }
-
-    if (bind_prg_thread) {
-        // bind progress thread to core using the input binding specification if available
-        auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
-        if (err) {
-            errno = err;
-            printf("setting progress thread affinity failed: error %s\n", strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    // Put the queue pairs to the correct states
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        connect_ctx(ctxs[i], addrs[i]);
-    }
-    int cpu_num = sched_getcpu();
-    fprintf(stderr, "doing skip progress Thread is running on CPU %3d\n",  cpu_num);
-    req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
-    // Construct request-thread_num mapping for fast lookup
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        reqToWorkerNum[&reqs[i]] = i;
     }
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
         irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
     }
-    int finished_worker = 0;
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
@@ -158,43 +132,42 @@ void progress_thread(int id) {
                 if (finished_worker == 0) {
                     thread_started--;
                 }
+                // todo: this is added for support for SKIP. With this the while loop can be ended in two ways.. Also will break if
+                // thread_num / rx_thread_num is not an integer
+                // Find a better way to signal stop for the progress thread
                 if(++finished_worker == (thread_num / rx_thread_num)) {
                     break;
                 }
             }
         }
     }
-
-    // real iteration
-    total_messages = TOTAL;
-    msg_count = total_messages / thread_num;
-    remainder = total_messages % thread_num;
-    for (int i = 0; i < thread_num; i++) {
-        thread_recv_count[i] = (i < remainder) ? msg_count + 1 : msg_count;
-    }
-
-    // Post receive requests
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
-    }
-    finished_worker = 0;
-    // Mark the thread as started
-    thread_started++;
-    while (!thread_stop.load()) {
-        // Progress the receives
-        auto* recv_req = progress_new(rx_cqs[id]);
-        if (recv_req) {
-            // zli89: when the progress thread receives certain message
-            int worker_num = reqToWorkerNum[recv_req];
-            ++syncs[worker_num].sync;
-            // When each worker thread receives enough, don't post receive for this thread
-            if (--thread_recv_count[worker_num] > 0) {
-                char *buf = (char*) device.heap_ptr + (2 * worker_num + 1) * max_size;
-                irecv_tag_srq(device, buf, max_size, worker_num, &reqs[worker_num], &srqs[id]);
-            }
+}
+void progress_thread(int id) {
+    bool bind_prg_thread = true;
+    if (bind_prg_thread) {
+        // bind progress thread to core using the input binding specification if available
+        auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
+        if (err) {
+            errno = err;
+            printf("setting progress thread affinity failed: error %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
         }
     }
+    // Put the queue pairs to the correct states
+    for (int i = id; i < thread_num; i += rx_thread_num) {
+        connect_ctx(ctxs[i], addrs[i]);
+    }
+    int cpu_num = sched_getcpu();
+    fprintf(stderr, "doing skip progress Thread is running on CPU %3d\n",  cpu_num);
+
+    req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
+    std::unordered_map<req_t*, int> reqToWorkerNum;
+    // Construct request-thread_num mapping for later lookup
+    for (int i = id; i < thread_num; i += rx_thread_num) {
+        reqToWorkerNum[&reqs[i]] = i;
+    }
+    progress_loop(id, SKIP, reqs, reqToWorkerNum);
+    progress_loop(id, TOTAL, reqs, reqToWorkerNum);
     free(reqs);
 }
 

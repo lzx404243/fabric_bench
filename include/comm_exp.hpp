@@ -63,12 +63,9 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-//    int loop = TOTAL;
-//    int skip = SKIP;
 
     int loop = TOTAL;
     int skip = SKIP;
-    // todo: iteration is reduced to speed up debugging. Change this back
 
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
 //        if (msg_size >= LARGE) {
@@ -79,8 +76,9 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             f(msg_size, i);
         }
         omp::thread_barrier();
-        // wait for the progress thread to set up again..
+        // wait for the progress thread to set up again.
         while (thread_started.load() != rx_thread_num) continue;
+        omp::thread_barrier();
         //pmi_barrier();
         t = wtime();
 
