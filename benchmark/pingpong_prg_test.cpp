@@ -16,7 +16,7 @@ using namespace fb;
 
 int thread_num = 4;
 int min_size = 8;
-int max_size = 64 * 1024;
+int max_size = 1024;
 bool touch_data = false;
 int rank, size, target_rank;
 device_t device;
@@ -52,7 +52,7 @@ void *send_thread(void *arg) {
 //            (rank % (size / 2) * thread_count + thread_id),
 //            ((size / 2) * thread_count));
     int count = 0;
-    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+    RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
             //  progress for send completion
@@ -82,7 +82,7 @@ void *recv_thread(void *arg) {
 //            (rank % (size / 2) * thread_count + thread_id),
 //            ((size / 2) * thread_count));
 
-    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         while (syncs[thread_id].sync == 0) continue;
         --syncs[thread_id].sync;
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
@@ -178,8 +178,14 @@ int main(int argc, char *argv[]) {
         rx_thread_num = atoi(argv[2]);
     if (argc > 3)
         min_size = atoi(argv[3]);
-    if (argc > 4)
-        max_size = atoi(argv[4]);
+    if (argc > 4) {
+        // todo: fix max_size
+        auto tmp_size = atoi(argv[4]);
+        if (tmp_size != 8) {
+            fprintf(stderr, "max size needs to be fix before size other than 8 can be run.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
     if (argc > 5) {
         // comma-seperated list to specify the thread each progressive thread is going to bind to
         std::string core_list(argv[5]);
