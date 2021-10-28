@@ -8,8 +8,11 @@
 #include <sys/time.h>
 #include "config.hpp"
 #include "thread_utils.hpp"
+#include <atomic>
+
 
 extern int rx_thread_num;
+extern std::atomic<int> thread_started;
 
 namespace fb {
 static inline void comm_init() {
@@ -64,7 +67,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 //    int skip = SKIP;
 
     int loop = TOTAL;
-    int skip = 0;
+    int skip = SKIP;
     // todo: iteration is reduced to speed up debugging. Change this back
 
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
@@ -75,8 +78,9 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-
         omp::thread_barrier();
+        // wait for the progress thread to set up again..
+        while (thread_started.load() != rx_thread_num) continue;
         //pmi_barrier();
         t = wtime();
 

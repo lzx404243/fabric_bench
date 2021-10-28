@@ -104,7 +104,7 @@ void progress_thread(int id) {
     // Each worker thread is receiving a fix number of messages
     std::vector<int> thread_recv_count(thread_num);
     std::unordered_map<req_t*, int> reqToWorkerNum;
-    auto total_messages = TOTAL;// + SKIP;
+    auto total_messages = SKIP;
     auto msg_count = total_messages / thread_num;
     auto remainder = total_messages % thread_num;
     //printf("Each thread takes %d messages. remainder: %d\n", msg_count, remainder);
@@ -127,7 +127,7 @@ void progress_thread(int id) {
         connect_ctx(ctxs[i], addrs[i]);
     }
     int cpu_num = sched_getcpu();
-    fprintf(stderr, "progress Thread is running on CPU %3d\n",  cpu_num);
+    fprintf(stderr, "doing skip progress Thread is running on CPU %3d\n",  cpu_num);
     req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
     // Construct request-thread_num mapping for fast lookup
     for (int i = id; i < thread_num; i += rx_thread_num) {
@@ -138,6 +138,47 @@ void progress_thread(int id) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
         irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
     }
+    int finished_worker = 0;
+    // Mark the thread as started
+    thread_started++;
+    while (!thread_stop.load()) {
+        // Progress the receives
+        auto* recv_req = progress_new(rx_cqs[id]);
+        if (recv_req) {
+            // zli89: when the progress thread receives certain message
+            int worker_num = reqToWorkerNum[recv_req];
+            ++syncs[worker_num].sync;
+            // When each worker thread receives enough, don't post receive for this thread
+            if (--thread_recv_count[worker_num] > 0) {
+                char *buf = (char*) device.heap_ptr + (2 * worker_num + 1) * max_size;
+                irecv_tag_srq(device, buf, max_size, worker_num, &reqs[worker_num], &srqs[id]);
+            } else {
+                // this worker is done
+                // one worker is done, phasing out.
+                if (finished_worker == 0) {
+                    thread_started--;
+                }
+                if(++finished_worker == (thread_num / rx_thread_num)) {
+                    break;
+                }
+            }
+        }
+    }
+
+    // real iteration
+    total_messages = TOTAL;
+    msg_count = total_messages / thread_num;
+    remainder = total_messages % thread_num;
+    for (int i = 0; i < thread_num; i++) {
+        thread_recv_count[i] = (i < remainder) ? msg_count + 1 : msg_count;
+    }
+
+    // Post receive requests
+    for (int i = id; i < thread_num; i += rx_thread_num) {
+        char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
+        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
+    }
+    finished_worker = 0;
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
