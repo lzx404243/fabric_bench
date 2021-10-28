@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <thread>
 #include <boost/tokenizer.hpp>
+#include <chrono>
 
 using namespace boost;
 #define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
@@ -38,6 +39,8 @@ int rx_thread_num = 1;
 
 std::vector<int> prg_thread_bindings;
 
+int compute_time_in_ms = 0;
+
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
     int thread_id = omp::thread_id();
@@ -63,6 +66,10 @@ void *send_thread(void *arg) {
         }
         while (syncs[thread_id].sync == 0) continue;
         --syncs[thread_id].sync;
+        // compute
+        if (compute_time_in_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_ms));
+        }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -85,6 +92,10 @@ void *recv_thread(void *arg) {
 RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         while (syncs[thread_id].sync == 0) continue;
         --syncs[thread_id].sync;
+        // compute
+        if (compute_time_in_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_ms));
+        }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
             //  progress for send completion
@@ -199,6 +210,9 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "number of binding specification doesn't match the number of progress thread.\n");
             exit(EXIT_FAILURE);
         }
+    }
+    if (argc > 6) {
+        compute_time_in_ms = atoi(argv[6]);
     }
     //printf("got all arguments");
     if (thread_num * 2 * max_size > HEAP_SIZE) {

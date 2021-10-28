@@ -100,8 +100,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             char output_str[256];
             int used = 0;
             // output is modified to show the worker thread
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f",
-                             omp::thread_count() + rx_thread_num, latency, msgrate, bw);
+            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f",
+                             omp::thread_count() + rx_thread_num, latency, msgrate, bw, t);
             printf("%s\n", output_str);
             fflush(stdout);
         }
