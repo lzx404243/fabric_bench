@@ -27,7 +27,7 @@ addr_t *addrs;
 srq_t * srqs;
 
 struct sync_t {
-    alignas(64) volatile std::atomic<int> sync;
+    alignas(64) std::atomic<int> sync;
     char pad[64 - sizeof(std::atomic<int>)];
 };
 

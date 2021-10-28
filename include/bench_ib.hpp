@@ -19,23 +19,25 @@ struct device_t {
 };
 
 struct cq_t {
-    ibv_cq *cq;
+    alignas(64) ibv_cq *cq;
+    char pad[64 - sizeof(ibv_cq*)];
 };
 
 struct srq_t {
-    ibv_srq* srq;
+    alignas(64) ibv_srq* srq;
+    char pad[64 - sizeof(ibv_srq*)];
 };
 
 #include "bench_ib_helper.hpp"
 
-struct ctx_t {
+struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
     int pending;
 };
 
-struct addr_t {
+struct alignas(64) addr_t {
     conn_info remote_conn_info;
 };
 
