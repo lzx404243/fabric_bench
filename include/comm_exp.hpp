@@ -25,6 +25,18 @@ static inline void comm_free() {
     pmi_finalize();
 }
 
+static inline void sleep_for_us(int compute_time_in_us) {
+    struct timespec start, stop;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    while (1) {
+        clock_gettime(CLOCK_MONOTONIC, &stop);
+        if ((stop.tv_nsec - start.tv_nsec) * 1e3 >= compute_time_in_us) {
+            break;
+        }
+    }
+    return;
+}
+
 static inline double wtime() {
     timeval t1;
     gettimeofday(&t1, nullptr);

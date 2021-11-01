@@ -39,7 +39,7 @@ int rx_thread_num = 1;
 
 std::vector<int> prg_thread_bindings;
 
-int compute_time_in_ms = 0;
+int compute_time_in_us = 0;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -67,8 +67,9 @@ void *send_thread(void *arg) {
         while (syncs[thread_id].sync == 0) continue;
         --syncs[thread_id].sync;
         // compute
-        if (compute_time_in_ms > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_ms));
+        if (compute_time_in_us > 0) {
+            sleep_for_us(compute_time_in_us);
+            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -93,8 +94,9 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
         while (syncs[thread_id].sync == 0) continue;
         --syncs[thread_id].sync;
         // compute
-        if (compute_time_in_ms > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_ms));
+        if (compute_time_in_us > 0) {
+            sleep_for_us(compute_time_in_us);
+            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         while (req.type != REQ_TYPE_NULL) {
@@ -212,7 +214,7 @@ int main(int argc, char *argv[]) {
         }
     }
     if (argc > 6) {
-        compute_time_in_ms = atoi(argv[6]);
+        compute_time_in_us = atoi(argv[6]);
     }
     //printf("got all arguments");
     if (thread_num * 2 * max_size > HEAP_SIZE) {
