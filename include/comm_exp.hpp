@@ -13,8 +13,11 @@
 
 extern int rx_thread_num;
 extern std::atomic<int> thread_started;
+extern fb::compute_time_acc_t* compute_time_accs;
 
 namespace fb {
+
+
 static inline void comm_init() {
     MLOG_Init();
     pmi_master_init();
@@ -25,15 +28,16 @@ static inline void comm_free() {
     pmi_finalize();
 }
 
-static inline void sleep_for_us(int compute_time_in_us) {
+static inline void sleep_for_us(int compute_time_in_us, compute_time_acc_t& time_acc) {
     struct timespec start, stop;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
     while (1) {
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
-        long long elapsed_ns = ( stop.tv_nsec - start.tv_nsec )
-                + ( stop.tv_sec - start.tv_sec ) * 1e9;
-        if (elapsed_ns >= (compute_time_in_us * 1e3)) {
-            //printf("time elapsed: %lld\n", elapsed_ns);
+        double elapsed_us = ( stop.tv_nsec - start.tv_nsec ) / 1e3
+                + ( stop.tv_sec - start.tv_sec ) * 1e6;
+        if (elapsed_us >= compute_time_in_us) {
+            printf("time elapsed: %lf\n", elapsed_us);
+            time_acc.tot_compute_time_us += elapsed_us;
             break;
         }
     }
@@ -73,6 +77,15 @@ static inline double get_bw(double time, size_t size, double n_msg) {
     return n_msg * size / time;
 }
 
+static inline double get_comm_overhead(double completion_time_second, compute_time_acc_t* thread_compute_times) {
+    double total_compute_time_us = 0;
+    for (int i = 0; i < omp::thread_count(); i++) {
+        total_compute_time_us += thread_compute_times[i].tot_compute_time_us;
+    }
+    printf("total compute time : %lf ,total completion time: %lf, diff: %lf \n", total_compute_time_us, completion_time_second * 1e6 , 1e6 *completion_time_second - total_compute_time_us);
+    return completion_time_second * 1e6 - total_compute_time_us;
+}
+
 template<typename FUNC>
 static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
@@ -91,6 +104,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             f(msg_size, i);
         }
         omp::thread_barrier();
+        // clean up the time acc for SKIP..
+        compute_time_accs[omp::thread_id()].tot_compute_time_us = 0;
         // wait for the progress thread to set up again.
         while (thread_started.load() != rx_thread_num) continue;
         omp::thread_barrier();
@@ -111,7 +126,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
-
+            double comm_overhead = get_comm_overhead(t, compute_time_accs);
             char output_str[256];
             int used = 0;
             // output is modified to show the worker thread

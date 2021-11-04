@@ -46,6 +46,10 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
+struct alignas(64) compute_time_acc_t {
+    double tot_compute_time_us = 0;
+};
+
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
     // Get the list of devices

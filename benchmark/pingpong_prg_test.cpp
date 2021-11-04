@@ -36,6 +36,7 @@ sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 int rx_thread_num = 1;
+compute_time_acc_t* compute_time_accs;
 
 std::vector<int> prg_thread_bindings;
 
@@ -51,6 +52,7 @@ void *send_thread(void *arg) {
     char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
     auto& cq = cqs[thread_id];
     req_t req = {REQ_TYPE_NULL};
+    compute_time_acc_t &time_acc = compute_time_accs[thread_id];
 //     printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
 //            (rank % (size / 2) * thread_count + thread_id),
 //            ((size / 2) * thread_count));
@@ -68,7 +70,7 @@ void *send_thread(void *arg) {
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
-            sleep_for_us(compute_time_in_us);
+            sleep_for_us(compute_time_in_us, time_acc);
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
@@ -84,6 +86,8 @@ void *recv_thread(void *arg) {
     req_t req = {REQ_TYPE_NULL};
     int cpu_num = sched_getcpu();
     auto& cq = cqs[thread_id];
+    compute_time_acc_t &time_acc = compute_time_accs[thread_id];
+
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
 
 //     printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
@@ -95,7 +99,7 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
-            sleep_for_us(compute_time_in_us);
+            sleep_for_us(compute_time_in_us, time_acc);
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
@@ -236,6 +240,8 @@ int main(int argc, char *argv[]) {
     rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
     // Shared receive queues queues(per progress thread)
     srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
+    // Accumulators for compute time for each thread
+    compute_time_accs = (compute_time_acc_t*) calloc(thread_num, sizeof(compute_time_acc_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
