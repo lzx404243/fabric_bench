@@ -27,10 +27,13 @@ static inline void comm_free() {
 
 static inline void sleep_for_us(int compute_time_in_us) {
     struct timespec start, stop;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
     while (1) {
-        clock_gettime(CLOCK_MONOTONIC, &stop);
-        if ((stop.tv_nsec - start.tv_nsec) * 1e3 >= compute_time_in_us) {
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+        long long elapsed_ns = ( stop.tv_nsec - start.tv_nsec )
+                + ( stop.tv_sec - start.tv_sec ) * 1e9;
+        if (elapsed_ns >= (compute_time_in_us * 1e3)) {
+            //printf("time elapsed: %lld\n", elapsed_ns);
             break;
         }
     }
