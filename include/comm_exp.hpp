@@ -50,6 +50,12 @@ static inline double wtime() {
     return t1.tv_sec + t1.tv_usec / 1e6;
 }
 
+static inline double wtime_1() {
+    struct timespec start;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+    return start.tv_sec + start.tv_nsec / 1e9;
+}
+
 void write_buffer(char *buffer, int len, char input) {
     for (int i = 0; i < len; ++i) {
         buffer[i] = input;
@@ -86,12 +92,21 @@ static inline double get_comm_overhead(double completion_time_second, compute_ti
     return completion_time_second * 1e6 - total_compute_time_us;
 }
 
+static inline double get_comm_overhead_1(double completion_time_second, compute_time_acc_t* thread_compute_times) {
+    double total_compute_time_us = 0;
+    for (int i = 0; i < omp::thread_count(); i++) {
+        total_compute_time_us += thread_compute_times[i].tot_compute_time_us;
+    }
+    printf("total compute time : %lf ,total completion time(with new time): %lf, diff: %lf \n", total_compute_time_us, completion_time_second * 1e6 , 1e6 *completion_time_second - total_compute_time_us);
+    return completion_time_second * 1e6 - total_compute_time_us;
+}
+
 template<typename FUNC>
 static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-
+    double t1 = 0;
     int loop = TOTAL;
     int skip = SKIP;
 
@@ -111,6 +126,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         omp::thread_barrier();
         //pmi_barrier();
         t = wtime();
+        t1 = wtime_1();
 
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
@@ -120,6 +136,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
         omp::thread_barrier();
         t = wtime() - t;
+        t1 =wtime_1() - t1;
+
         //printf("all ranks done!\n");
 
         if (report) {
@@ -127,6 +145,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
             double comm_overhead = get_comm_overhead(t, compute_time_accs);
+            comm_overhead = get_comm_overhead_1(t1, compute_time_accs);
+
             char output_str[256];
             int used = 0;
             // output is modified to show the worker thread
