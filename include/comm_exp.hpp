@@ -50,6 +50,12 @@ static inline double wtime() {
     return t1.tv_sec + t1.tv_usec / 1e6;
 }
 
+static inline double cpu_time() {
+    struct timespec t1;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
+    return t1.tv_sec + t1.tv_nsec / 1e9;
+}
+
 void write_buffer(char *buffer, int len, char input) {
     for (int i = 0; i < len; ++i) {
         buffer[i] = input;
@@ -83,7 +89,7 @@ static inline double get_comm_overhead(double completion_time_second, compute_ti
         total_compute_time_us += thread_compute_times[i].tot_compute_time_us;
     }
     total_compute_time_us = total_compute_time_us / omp::thread_count();
-    //printf("total compute time : %lf ,total completion time: %lf, diff: %lf \n", total_compute_time_us, completion_time_second * 1e6 , 1e6 *completion_time_second - total_compute_time_us);
+    fprintf(stderr, "total_iter: %d, completion time: %lf ms, compute time(thread) : %lf ms, diff: %lf ms\n", TOTAL, completion_time_second * 1e3, total_compute_time_us / 1e3 , completion_time_second * 1e3 - total_compute_time_us / 1e3);
     // return value in ms
     return completion_time_second * 1e3 - total_compute_time_us / 1e3;
 }
@@ -93,6 +99,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
+    double t2 = 0;
     int loop = TOTAL;
     int skip = SKIP;
 
@@ -111,7 +118,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         while (thread_started.load() != rx_thread_num) continue;
         omp::thread_barrier();
         //pmi_barrier();
-        t = wtime();
+        t = cpu_time();
+        t2 = wtime();
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
         }
@@ -119,14 +127,15 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         //printf("ranks %i, thread %i done!\n", pmi_get_rank(), omp::thread_id());
 
         omp::thread_barrier();
-        t = wtime() - t;
+        t = cpu_time() - t;
+        t2 = wtime() - t2;
         //printf("all ranks done!\n");
 
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
-            double comm_overhead = get_comm_overhead(t, compute_time_accs);
+            double comm_overhead = get_comm_overhead(t2, compute_time_accs);
             comm_overhead = get_comm_overhead(t, compute_time_accs);
 
             char output_str[256];
