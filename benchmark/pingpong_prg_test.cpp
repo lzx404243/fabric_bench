@@ -36,7 +36,9 @@ sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 int rx_thread_num = 1;
-compute_time_acc_t* compute_time_accs;
+time_acc_t * compute_time_accs;
+time_acc_t * idle_time_accs;
+
 
 std::vector<int> prg_thread_bindings;
 
@@ -52,7 +54,10 @@ void *send_thread(void *arg) {
     char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
     auto& cq = cqs[thread_id];
     req_t req = {REQ_TYPE_NULL};
-    compute_time_acc_t &time_acc = compute_time_accs[thread_id];
+    time_acc_t &time_acc = compute_time_accs[thread_id];
+    time_acc_t &idle_time_acc = idle_time_accs[thread_id];
+    bool idled = false;
+    struct timespec start, stop;
 //     printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
 //            (rank % (size / 2) * thread_count + thread_id),
 //            ((size / 2) * thread_count));
@@ -66,7 +71,22 @@ void *send_thread(void *arg) {
                 send_req->type = REQ_TYPE_NULL;
             }
         }
-        while (syncs[thread_id].sync == 0) continue;
+        while (syncs[thread_id].sync == 0) {
+            // idle
+            if (!idled) {
+                // start timer
+                idled = true;
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            }
+            continue;
+        }
+        if (idled) {
+            // stop timer
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+            idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
+                    + ( stop.tv_sec - start.tv_sec ) * 1e6;
+            idled = false;
+        }
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
@@ -86,7 +106,10 @@ void *recv_thread(void *arg) {
     req_t req = {REQ_TYPE_NULL};
     int cpu_num = sched_getcpu();
     auto& cq = cqs[thread_id];
-    compute_time_acc_t &time_acc = compute_time_accs[thread_id];
+    time_acc_t &time_acc = compute_time_accs[thread_id];
+    time_acc_t &idle_time_acc = idle_time_accs[thread_id];
+    bool idled = false;
+    struct timespec start, stop;
 
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
 
@@ -95,7 +118,23 @@ void *recv_thread(void *arg) {
 //            ((size / 2) * thread_count));
 
 RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        while (syncs[thread_id].sync == 0) continue;
+        while (syncs[thread_id].sync == 0) {
+            // idle
+            if (!idled) {
+                // start timer
+                idled = true;
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            }
+            continue;
+        }
+        if (idled) {
+            // stop timer
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+            idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
+                    + ( stop.tv_sec - start.tv_sec ) * 1e6;
+            idled = false;
+        }
+
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
@@ -241,7 +280,9 @@ int main(int argc, char *argv[]) {
     // Shared receive queues queues(per progress thread)
     srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
     // Accumulators for compute time for each thread
-    compute_time_accs = (compute_time_acc_t*) calloc(thread_num, sizeof(compute_time_acc_t));
+    compute_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
+    // Accumulators for idle time for each thread
+    idle_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
