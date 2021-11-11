@@ -44,12 +44,6 @@ static inline void sleep_for_us(int compute_time_in_us, compute_time_acc_t& time
     return;
 }
 
-static inline double wtime() {
-    timeval t1;
-    gettimeofday(&t1, nullptr);
-    return t1.tv_sec + t1.tv_usec / 1e6;
-}
-
 static inline double cpu_time() {
     struct timespec t1;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
@@ -99,7 +93,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
-    double t2 = 0;
     int loop = TOTAL;
     int skip = SKIP;
 
@@ -119,7 +112,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         omp::thread_barrier();
         //pmi_barrier();
         t = cpu_time();
-        t2 = wtime();
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
         }
@@ -128,15 +120,13 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
         omp::thread_barrier();
         t = cpu_time() - t;
-        t2 = wtime() - t2;
         //printf("all ranks done!\n");
 
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
-            double comm_overhead = get_comm_overhead(t2, compute_time_accs);
-            comm_overhead = get_comm_overhead(t, compute_time_accs);
+            double comm_overhead = get_comm_overhead(t, compute_time_accs);
 
             char output_str[256];
             int used = 0;
