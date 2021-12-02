@@ -2,7 +2,6 @@
 #include "comm_exp.hpp"
 #include "thread_utils.hpp"
 #include "bench_ib.hpp"
-#include <atomic>
 #include <vector>
 #include <unordered_map>
 #include <thread>
@@ -27,10 +26,7 @@ ctx_t *ctxs;
 addr_t *addrs;
 srq_t * srqs;
 
-struct sync_t {
-    alignas(64) std::atomic<int> sync;
-    char pad[64 - sizeof(std::atomic<int>)];
-};
+
 
 sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
@@ -43,6 +39,7 @@ time_acc_t * idle_time_accs;
 std::vector<int> prg_thread_bindings;
 
 int compute_time_in_us = 0;
+int prefilled_work = 0;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -259,6 +256,10 @@ int main(int argc, char *argv[]) {
     if (argc > 6) {
         compute_time_in_us = atoi(argv[6]);
     }
+    if (argc > 7) {
+        prefilled_work = atoi(argv[7]);
+    }
+
     //printf("got all arguments");
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);

@@ -15,6 +15,8 @@ extern int rx_thread_num;
 extern std::atomic<int> thread_started;
 extern fb::time_acc_t * compute_time_accs;
 extern fb::time_acc_t * idle_time_accs;
+extern fb::sync_t *syncs;
+extern int prefilled_work;
 
 namespace fb {
 
@@ -105,12 +107,20 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
+        if (omp::thread_id() == 0) {
+            pmi_barrier();
+        }
         omp::thread_barrier();
         // clean up the time acc for SKIP..
         compute_time_accs[omp::thread_id()].tot_time_us = 0;
         idle_time_accs[omp::thread_id()].tot_time_us = 0;
+        // reset syncs
+        syncs[omp::thread_id()].sync = prefilled_work;
         // wait for the progress thread to set up again.
         while (thread_started.load() != rx_thread_num) continue;
+        if (omp::thread_id() == 0) {
+            pmi_barrier();
+        }
         omp::thread_barrier();
         //pmi_barrier();
         t = cpu_time();
@@ -122,6 +132,9 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
         omp::thread_barrier();
         t = cpu_time() - t;
+        if (omp::thread_id() == 0) {
+            pmi_barrier();
+        }
         //printf("all ranks done!\n");
 
         if (report) {
@@ -137,7 +150,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             int used = 0;
             // todo: print header?
             // output is modified to show the worker thread
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f",
+            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.3f",
                              omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms);
             printf("%s\n", output_str);
             fflush(stdout);

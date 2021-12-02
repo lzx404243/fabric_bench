@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/param.h>
+#include <atomic>
 
 namespace fb {
 
@@ -48,6 +49,11 @@ struct req_t {
 
 struct alignas(64) time_acc_t {
     double tot_time_us = 0;
+};
+
+struct sync_t {
+    alignas(64) std::atomic<int> sync;
+    char pad[64 - sizeof(std::atomic<int>)];
 };
 
 static inline int init_device(device_t *device, bool thread_safe) {
