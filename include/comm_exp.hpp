@@ -14,7 +14,6 @@
 extern int rx_thread_num;
 extern std::atomic<int> thread_started;
 extern fb::time_acc_t * compute_time_accs;
-extern fb::time_acc_t * idle_time_accs;
 extern fb::sync_t *syncs;
 extern int prefilled_work;
 
@@ -113,7 +112,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         omp::thread_barrier();
         // clean up the time acc for SKIP..
         compute_time_accs[omp::thread_id()].tot_time_us = 0;
-        idle_time_accs[omp::thread_id()].tot_time_us = 0;
         // reset syncs
         syncs[omp::thread_id()].sync = prefilled_work;
         // wait for the progress thread to set up again.
@@ -144,14 +142,13 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
             double completion_time_ms = t * 1e3;
             double compute_time_ms = get_overhead(compute_time_accs);
-            double idle_time_ms = get_overhead(idle_time_accs);
 
             char output_str[256];
             int used = 0;
             // todo: print header?
             // output is modified to show the worker thread
             used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.3f",
-                             omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms);
+                             omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, 0);
             printf("%s\n", output_str);
             fflush(stdout);
         }
