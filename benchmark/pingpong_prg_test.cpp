@@ -59,13 +59,9 @@ void *send_thread(void *arg) {
     int count = 0;
     RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) {
-            //  progress for send completion
-            auto* send_req = progress_new(cq);
-            if (send_req) {
-                send_req->type = REQ_TYPE_NULL;
-            }
-        }
+        // progress for send completion. Note that we don't block  for the completion of the send here
+        progress_new(cq);
+
         while (syncs[thread_id].sync == 0) {
             // idle
             continue;
@@ -111,13 +107,9 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) {
-            //  progress for send completion
-            auto* send_req = progress_new(cq);
-            if (send_req) {
-                send_req->type = REQ_TYPE_NULL;
-            }
-        }
+        // progress for send completion. Note that we don't block for the completion of the send here
+        progress_new(cq);
+
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
