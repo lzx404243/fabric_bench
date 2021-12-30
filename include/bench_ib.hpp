@@ -51,6 +51,10 @@ struct alignas(64) time_acc_t {
     double tot_time_us = 0;
 };
 
+struct alignas(64) counter_t {
+    long progress_count = 0;
+};
+
 struct sync_t {
     alignas(64) std::atomic<int> sync;
     char pad[64 - sizeof(std::atomic<int>)];

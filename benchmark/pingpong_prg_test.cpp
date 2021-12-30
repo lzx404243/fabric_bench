@@ -33,6 +33,7 @@ std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 int rx_thread_num = 1;
 time_acc_t * compute_time_accs;
+counter_t *progress_counters;
 
 
 std::vector<int> prg_thread_bindings;
@@ -126,6 +127,8 @@ void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, in
     // real iteration
     // Each worker thread is receiving a fixed number of messages
     std::vector<int> thread_recv_count(thread_num);
+    long& progress_counter = progress_counters[id].progress_count;
+    progress_counter = 0;
     auto msg_count = iter / thread_num;
     auto remainder = iter % thread_num;
     auto finished_worker = 0;
@@ -142,6 +145,7 @@ void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, in
     while (!thread_stop.load()) {
         // Progress the receives
         auto* recv_req = progress_new(rx_cqs[id]);
+        progress_counter++;
         if (recv_req) {
             // zli89: when the progress thread receives certain message
             int worker_num = reqToWorkerNum[recv_req];
@@ -253,6 +257,8 @@ int main(int argc, char *argv[]) {
     srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
     // Accumulators for compute time for each thread
     compute_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
+    // counters for progress for each progress thread
+    progress_counters = (counter_t *) calloc(thread_num, sizeof(counter_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
