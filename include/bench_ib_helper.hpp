@@ -44,7 +44,7 @@ static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq, srq_t srq
 			.recv_cq = rx_cq.cq,
 			.srq     = srq.srq,
 			.cap     = {
-				.max_send_wr  = 1,
+				.max_send_wr  = 1024,
 				.max_recv_wr  = rx_depth,
 				.max_send_sge = 1,
 				.max_recv_sge = 1,
