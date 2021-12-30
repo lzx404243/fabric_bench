@@ -127,7 +127,7 @@ void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, in
     // real iteration
     // Each worker thread is receiving a fixed number of messages
     std::vector<int> thread_recv_count(thread_num);
-    long& progress_counter = progress_counters[id].progress_count;
+    long long& progress_counter = progress_counters[id].progress_count;
     progress_counter = 0;
     auto msg_count = iter / thread_num;
     auto remainder = iter % thread_num;

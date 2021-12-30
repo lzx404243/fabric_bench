@@ -91,8 +91,8 @@ static inline double get_overhead(time_acc_t * thread_acc_times) {
     return average_time_ms;
 }
 
-static inline long get_progress_total(const counter_t* progress_counters) {
-    long total = 0;
+static inline long long get_progress_total(const counter_t* progress_counters) {
+    long long total = 0;
     for (int i = 0; i < rx_thread_num; i++) {
         total += progress_counters[i].progress_count;
     }
@@ -150,12 +150,12 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
             double completion_time_ms = t * 1e3;
             double compute_time_ms = get_overhead(compute_time_accs);
-            long progress_counter_sum = get_progress_total(progress_counters);
+            long long progress_counter_sum = get_progress_total(progress_counters);
             char output_str[256];
             int used = 0;
             // todo: print header?
             // output is modified to show the worker thread
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10l",
+            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-19Lu",
                              omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, progress_counter_sum);
             printf("%s\n", output_str);
             fflush(stdout);

@@ -52,7 +52,7 @@ struct alignas(64) time_acc_t {
 };
 
 struct alignas(64) counter_t {
-    long progress_count = 0;
+    long long progress_count = 0;
 };
 
 struct sync_t {
