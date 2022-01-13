@@ -166,6 +166,7 @@ static inline int init_ctx(device_t *device, cq_t cq, cq_t rx_cq, ctx_t *ctx, sr
 
 static inline int free_ctx(ctx_t *ctx) {
     IBV_SAFECALL(ibv_destroy_qp(ctx->qp));
+    ctx->qp = nullptr;
     // todo: might need to free ctx->local_conn_info
     return FB_OK;
 }

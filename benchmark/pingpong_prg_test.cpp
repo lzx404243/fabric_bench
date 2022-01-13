@@ -7,6 +7,7 @@
 #include <thread>
 #include <boost/tokenizer.hpp>
 #include <chrono>
+#include <math.h>
 
 using namespace boost;
 #define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
@@ -41,6 +42,8 @@ std::vector<int> prg_thread_bindings;
 
 int compute_time_in_us = 0;
 int prefilled_work = 0;
+int num_worker_per_qp = 1;
+int num_qp = thread_num;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -202,10 +205,6 @@ void progress_thread(int id) {
             exit(EXIT_FAILURE);
         }
     }
-    // Put the queue pairs to the correct states
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        connect_ctx(ctxs[i], addrs[i]);
-    }
     int cpu_num = sched_getcpu();
     fprintf(stderr, "doing skip progress Thread is running on CPU %3d\n",  cpu_num);
 
@@ -255,8 +254,18 @@ int main(int argc, char *argv[]) {
     if (argc > 7) {
         prefilled_work = atoi(argv[7]);
     }
-
-    //printf("got all arguments");
+    if (argc > 8) {
+        num_worker_per_qp = atoi(argv[8]);
+        if (num_worker_per_qp > floor(thread_num / rx_thread_num)) {
+            printf("Number of worker sharing one queue pair is too large. max is: %d\n", floor(thread_num / rx_thread_num));
+            exit(EXIT_FAILURE);
+        }
+    }
+    // check worker thread distribution
+    if (thread_num % rx_thread_num != 0) {
+        printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
+        exit(EXIT_FAILURE);
+    }
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
         exit(1);
@@ -267,9 +276,10 @@ int main(int argc, char *argv[]) {
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
-    // Send completion queues(per workers)
+    // Send completion queues (per worker)
+    //num_qp = ceil((double)thread_num / num_worker_per_qp);
     cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
-    // Send context (per workers)
+    // Send context (per worker)
     ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
     // Receive completion queues(per progress thread)
@@ -289,15 +299,35 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < rx_thread_num; ++i) {
         init_srq(device, &srqs[i]);
     }
-    for (int i = 0; i < thread_num; ++i) {
-        init_cq(device, &cqs[i]);
-        init_ctx(&device, cqs[i], rx_cqs[i % rx_thread_num], &ctxs[i], srqs[i % rx_thread_num]);
-        put_ctx_addr(ctxs[i], i);
-    }
+    // set up queue pairs and context
+    for (int i = 0; i < rx_thread_num; ++i) {
+        int groupCntIdx = 0;
+        for (int workerThreadIdx = i; workerThreadIdx < thread_num; workerThreadIdx +=rx_thread_num) {
+            // workers handled by the same progress thread
+            if (groupCntIdx++ % num_worker_per_qp == 0) {
+                // only one in a group creates the queue pair
+                //std::cout << "worker " << workerThreadIdx << "is creating resources " << std::endl ;
 
+                init_cq(device, &cqs[workerThreadIdx]);
+                init_ctx(&device, cqs[workerThreadIdx], rx_cqs[workerThreadIdx % rx_thread_num], &ctxs[workerThreadIdx], srqs[workerThreadIdx % rx_thread_num]);
+            }
+            put_ctx_addr(ctxs[workerThreadIdx], workerThreadIdx);
+        }
+    }
     flush_ctx_addr();
     for (int i = 0; i < thread_num; ++i) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
+    }
+    // Put the queue pairs to the correct states
+    for (int i = 0; i < thread_num; i++) {
+        if (ctxs[i].qp) {
+            connect_ctx(ctxs[i], addrs[i]);
+        } else {
+            // copy shared queue pair and associated cqs from worker in the same group
+            //std::cout << "worker " << i << "is coping from " << (i - rx_thread_num) << std::endl ;
+            ctxs[i] = ctxs[i - rx_thread_num];
+            cqs[i] = cqs[i - rx_thread_num];
+        }
     }
 
     // atomic flag(per worker) used by the progress thread to signal that the worker can read from the receive buf
@@ -320,11 +350,19 @@ int main(int argc, char *argv[]) {
     for (int id = 0; id < rx_thread_num; id++) {
         threads[id].join();
     }
-    // todo: fix resource cleanup error
-    for (int i = 0; i < thread_num; ++i) {
-        free_ctx(&ctxs[i]);
-        free_cq(&cqs[i]);
+
+    // clean up resources
+    for (int i = 0; i < rx_thread_num; ++i) {
+        int groupCntIdx = 0;
+        for (int workerThreadIdx = i; workerThreadIdx < thread_num; workerThreadIdx +=rx_thread_num) {
+            // workers handled by the same progress thread
+            if (groupCntIdx++ % num_worker_per_qp == 0) {
+                free_ctx(&ctxs[workerThreadIdx]);
+                free_cq(&cqs[workerThreadIdx]);
+            }
+        }
     }
+
     free_device(&device);
     free(addrs);
     free(ctxs);
