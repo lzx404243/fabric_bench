@@ -92,6 +92,13 @@ void *send_thread(void *arg) {
         }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
+    // check whether the thread has migrated
+    int cpu_num_final = sched_getcpu();
+    if (cpu_num_final != cpu_num) {
+        fprintf(stderr, "Thread %3d migrated to %3d\n", thread_id, cpu_num_final);
+        exit(2);
+    }
+
     return nullptr;
 }
 
@@ -144,6 +151,12 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
 
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
+    // check whether the thread has migrated
+    int cpu_num_final = sched_getcpu();
+    if (cpu_num_final != cpu_num) {
+        fprintf(stderr, "Thread %3d migrated to %3d\n", thread_id, cpu_num_final);
+        exit(2);
+    }
     return nullptr;
 }
 
