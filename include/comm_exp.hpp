@@ -48,6 +48,20 @@ static inline void sleep_for_us(int compute_time_in_us, time_acc_t & time_acc) {
     return;
 }
 
+static inline void sleep_for_ns(int compute_time_in_ns) {
+    struct timespec start, stop;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+    while (1) {
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+        double elapsed_us = ( stop.tv_nsec - start.tv_nsec)
+                + ( stop.tv_sec - start.tv_sec ) * 1e9;
+        if (elapsed_us >= compute_time_in_ns) {
+            break;
+        }
+    }
+    return;
+}
+
 static inline double wall_time() {
     struct timespec t1;
     clock_gettime(CLOCK_REALTIME, &t1);

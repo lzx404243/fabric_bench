@@ -179,38 +179,48 @@ void progress_loop(int id, int iter) {
     }
     // list of worker ids that's polled from the completion queue as requests are completed
     int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
-
+    int numWorkersCompleted;
+    int backoff_in_ns;
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
         // Progress the receives
-        int numWorkersCompleted = progress_new(rx_cqs[id], completed_worker_num_from_cq);
-        progress_counter++;
-        if (numWorkersCompleted != 0) {
-            //for (int idx = 0; idx < numWorkersCompleted; idx++) {
-                int idx = 0;
-                // zli89: when the progress thread receives certain message
-                int worker_num = completed_worker_num_from_cq[idx];
-                ++syncs[worker_num].sync;
-                // When each worker thread receives enough, don't post receive for this thread
-                if (--thread_recv_count[worker_num] > 0) {
-                    char *buf = (char *) device.heap_ptr + (2 * worker_num + 1) * max_size;
-                    irecv_tag_srq(device, buf, max_size, worker_num, &srqs[id]);
-                } else {
-                    // this worker is done
-                    // one worker is done, phasing out.
-                    if (finished_worker == 0) {
-                        thread_started--;
-                    }
-                    // todo: this is added for support for SKIP. With this the while loop can be ended in two ways.. Also will break if
-                    // thread_num / rx_thread_num is not an integer
-                    // Find a better way to signal stop for the progress thread
-                    if (++finished_worker == (thread_num / rx_thread_num)) {
-                        break;
-                    }
-                }
-            //}
+        numWorkersCompleted = 0;
+        //backoff_in_ns = 100;
+        while (1) {
+            numWorkersCompleted = progress_new(rx_cqs[id], completed_worker_num_from_cq);
+            if (numWorkersCompleted > 0) {
+                break;
+            }
+            progress_counter++;
+//            backoff_in_ns *= 2;
+//            sleep_for_ns(backoff_in_ns);
         }
+
+        // got something from the cq
+        //for (int idx = 0; idx < numWorkersCompleted; idx++) {
+        int idx = 0;
+        // zli89: when the progress thread receives certain message
+        int worker_num = completed_worker_num_from_cq[idx];
+        ++syncs[worker_num].sync;
+        // When each worker thread receives enough, don't post receive for this thread
+        if (--thread_recv_count[worker_num] > 0) {
+            char *buf = (char *) device.heap_ptr + (2 * worker_num + 1) * max_size;
+            irecv_tag_srq(device, buf, max_size, worker_num, &srqs[id]);
+        } else {
+            // this worker is done
+            // one worker is done, phasing out.
+            if (finished_worker == 0) {
+                thread_started--;
+            }
+            // todo: this is added for support for SKIP. With this the while loop can be ended in two ways.. Also will break if
+            // thread_num / rx_thread_num is not an integer
+            // Find a better way to signal stop for the progress thread
+            if (++finished_worker == (thread_num / rx_thread_num)) {
+                break;
+            }
+        }
+        //}
     }
 }
 void progress_thread(int id) {
