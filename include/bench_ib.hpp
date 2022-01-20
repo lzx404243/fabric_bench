@@ -204,29 +204,35 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline int progress_new(cq_t cq) {
-    struct ibv_wc wc;
-    int result;
+static inline int progress_new(cq_t cq, int* completed_workers) {
+    const int numToPoll = 1;
+    struct ibv_wc wc[numToPoll];
+    int numCompleted;
     //printf("polling cq\n");
 
-    result = ibv_poll_cq(cq.cq, 1, &wc);
+    numCompleted = ibv_poll_cq(cq.cq, numToPoll, wc);
 
-    if (result < 0) {
+    if (numCompleted < 0) {
         printf("Error: ibv_poll_cq() failed\n");
         exit(EXIT_FAILURE);
     }
     // No completion event
-    if (result == 0) {
-        return -1;
+    if (numCompleted == 0 || !completed_workers) {
+        return 0;
     }
-    if (wc.status != ibv_wc_status::IBV_WC_SUCCESS) {
-        printf("Error: Failed status %s (%d)\n",
-               ibv_wc_status_str(wc.status),
-               wc.status);
-        exit(EXIT_FAILURE);
+
+    for (int i = 0; i < numCompleted; i++) {
+        if (wc[i].status != ibv_wc_status::IBV_WC_SUCCESS) {
+            printf("Error: Failed status %s (%d)\n",
+                   ibv_wc_status_str(wc[i].status),
+                   wc[i].status);
+            exit(EXIT_FAILURE);
+        }
+        // Success, put the worker ids in the array
+        completed_workers[i] = (int)wc[i].wr_id;
     }
-    // Success, return the wr_id(the worker id)
-    return (int)wc.wr_id;
+
+    return numCompleted;
 }
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
