@@ -160,7 +160,7 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
     return nullptr;
 }
 
-void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, int>& reqToWorkerNum) {
+void progress_loop(int id, int iter) {
     // real iteration
     // Each worker thread is receiving a fixed number of messages
     std::vector<int> thread_recv_count(thread_num);
@@ -175,22 +175,21 @@ void progress_loop(int id, int iter, req_t *&reqs, std::unordered_map<req_t*, in
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, i, &reqs[i], &srqs[id]);
+        irecv_tag_srq(device, buf, max_size, i, &srqs[id]);
     }
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
         // Progress the receives
-        auto* recv_req = progress_new(rx_cqs[id]);
+        int worker_num = progress_new(rx_cqs[id]);
         progress_counter++;
-        if (recv_req) {
+        if (worker_num != -1) {
             // zli89: when the progress thread receives certain message
-            int worker_num = reqToWorkerNum[recv_req];
             ++syncs[worker_num].sync;
             // When each worker thread receives enough, don't post receive for this thread
             if (--thread_recv_count[worker_num] > 0) {
                 char *buf = (char*) device.heap_ptr + (2 * worker_num + 1) * max_size;
-                irecv_tag_srq(device, buf, max_size, worker_num, &reqs[worker_num], &srqs[id]);
+                irecv_tag_srq(device, buf, max_size, worker_num, &srqs[id]);
             } else {
                 // this worker is done
                 // one worker is done, phasing out.
@@ -220,16 +219,8 @@ void progress_thread(int id) {
     }
     int cpu_num = sched_getcpu();
     fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
-
-    req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
-    std::unordered_map<req_t*, int> reqToWorkerNum;
-    // Construct request-thread_num mapping for later lookup
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        reqToWorkerNum[&reqs[i]] = i;
-    }
-    progress_loop(id, SKIP, reqs, reqToWorkerNum);
-    progress_loop(id, TOTAL, reqs, reqToWorkerNum);
-    free(reqs);
+    progress_loop(id, SKIP);
+    progress_loop(id, TOTAL);
 }
 
 int main(int argc, char *argv[]) {
