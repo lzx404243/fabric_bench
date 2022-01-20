@@ -73,13 +73,13 @@ void *send_thread(void *arg) {
             if (!idled) {
                 // start timer
                 idled = true;
-                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                clock_gettime(CLOCK_REALTIME, &start);
             }
             continue;
         }
         if (idled) {
             // stop timer
-            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+            clock_gettime(CLOCK_REALTIME, &stop);
             idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
                     + ( stop.tv_sec - start.tv_sec ) * 1e6;
             idled = false;
@@ -127,13 +127,13 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             if (!idled) {
                 // start timer
                 idled = true;
-                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                clock_gettime(CLOCK_REALTIME, &start);
             }
             continue;
         }
         if (idled) {
             // stop timer
-            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
+            clock_gettime(CLOCK_REALTIME, &stop);
             idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
                     + ( stop.tv_sec - start.tv_sec ) * 1e6;
             idled = false;
@@ -219,7 +219,7 @@ void progress_thread(int id) {
         }
     }
     int cpu_num = sched_getcpu();
-    fprintf(stderr, "doing skip progress Thread is running on CPU %3d\n",  cpu_num);
+    fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
 
     req_t *reqs = (req_t*) calloc(thread_num, sizeof(req_t));
     std::unordered_map<req_t*, int> reqToWorkerNum;

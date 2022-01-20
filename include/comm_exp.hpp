@@ -48,6 +48,12 @@ static inline void sleep_for_us(int compute_time_in_us, time_acc_t & time_acc) {
     return;
 }
 
+static inline double wall_time() {
+    struct timespec t1;
+    clock_gettime(CLOCK_REALTIME, &t1);
+    return t1.tv_sec + t1.tv_nsec / 1e9;
+}
+
 static inline double cpu_time() {
     struct timespec t1;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
@@ -134,7 +140,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         omp::thread_barrier();
         //pmi_barrier();
 
-        t = cpu_time();
+        t = wall_time();
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
         }
@@ -142,7 +148,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         //printf("ranks %i, thread %i done!\n", pmi_get_rank(), omp::thread_id());
 
         omp::thread_barrier();
-        t = cpu_time() - t;
+        t = wall_time() - t;
         if (omp::thread_id() == 0) {
             pmi_barrier();
         }
