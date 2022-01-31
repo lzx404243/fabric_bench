@@ -66,8 +66,6 @@ void *send_thread(void *arg) {
     RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
         // progress for send completion. Note that we don't block  for the completion of the send here
-        progress_new(cq, nullptr);
-
         while (syncs[thread_id].sync == 0) {
             // idle
             if (!idled) {
@@ -75,7 +73,7 @@ void *send_thread(void *arg) {
                 idled = true;
                 clock_gettime(CLOCK_REALTIME, &start);
             }
-            continue;
+            progress_new(cq, nullptr);
         }
         if (idled) {
             // stop timer
@@ -129,7 +127,8 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
                 idled = true;
                 clock_gettime(CLOCK_REALTIME, &start);
             }
-            continue;
+            // progress for send completion. Note that we don't block for the completion of the send here
+            progress_new(cq, nullptr);
         }
         if (idled) {
             // stop timer
@@ -146,8 +145,6 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        // progress for send completion. Note that we don't block for the completion of the send here
-        progress_new(cq, nullptr);
 
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -291,6 +288,8 @@ int main(int argc, char *argv[]) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
         exit(1);
     }
+    fprintf(stderr, "version: poll when worker idle\n");
+
     comm_init();
     init_device(&device, thread_num != 1);
 
