@@ -65,6 +65,8 @@ void *send_thread(void *arg) {
     int count = 0;
     RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
+        progress_new(cq, nullptr);
+
         // progress for send completion. Note that we don't block  for the completion of the send here
         while (syncs[thread_id].sync == 0) {
             // idle
@@ -145,6 +147,7 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, thread_id, &req);
+        progress_new(cq, nullptr);
 
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -157,7 +160,7 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
     return nullptr;
 }
 
-void progress_loop(int id, int iter) {
+void progress_loop(int id, int iter, int numReceivePerWorker) {
     // real iteration
     // Each worker thread is receiving a fixed number of messages
     std::vector<int> thread_recv_count(thread_num);
@@ -172,7 +175,10 @@ void progress_loop(int id, int iter) {
     // Post receive requests
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, i, &srqs[id]);
+        for (int j = 0; j < numReceivePerWorker; j++) {
+            // add a bunch of recv request beforehand
+            irecv_tag_srq(device, buf, max_size, i, &srqs[id]);
+        }
     }
     // list of worker ids that's polled from the completion queue as requests are completed
     int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
@@ -233,8 +239,10 @@ void progress_thread(int id) {
     }
     int cpu_num = sched_getcpu();
     fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
-    progress_loop(id, SKIP);
-    progress_loop(id, TOTAL);
+    int numReceivePerWorker = 1;
+    progress_loop(id, SKIP, numReceivePerWorker);
+    numReceivePerWorker = 8;
+    progress_loop(id, TOTAL, numReceivePerWorker);
 }
 
 int main(int argc, char *argv[]) {
@@ -280,10 +288,10 @@ int main(int argc, char *argv[]) {
         }
     }
     // check worker thread distribution
-    if (thread_num % rx_thread_num != 0) {
-        printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
-        exit(EXIT_FAILURE);
-    }
+//    if (thread_num % rx_thread_num != 0) {
+//        printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
+//        exit(EXIT_FAILURE);
+//    }
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
         exit(1);

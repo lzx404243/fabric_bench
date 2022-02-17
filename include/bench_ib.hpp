@@ -140,7 +140,7 @@ static inline int init_srq(device_t device, srq_t *srq) {
     // Create shared-receive queue, **number here affect performance**.
     struct ibv_srq_init_attr srq_attr;
     srq_attr.srq_context = 0;
-    srq_attr.attr.max_wr = 64;
+    srq_attr.attr.max_wr = 512;
     srq_attr.attr.max_sge = 1;
     srq_attr.attr.srq_limit = 0;
     srq->srq = ibv_create_srq(device.dev_pd, &srq_attr);

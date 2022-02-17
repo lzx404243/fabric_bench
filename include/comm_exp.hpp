@@ -136,7 +136,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-
         if (omp::thread_id() == 0) {
             pmi_barrier();
         }
