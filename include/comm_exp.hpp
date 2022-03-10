@@ -115,7 +115,7 @@ static inline double get_overhead(time_acc_t * thread_acc_times) {
 static inline long long get_progress_total(const counter_t* progress_counters) {
     long long total = 0;
     for (int i = 0; i < rx_thread_num; i++) {
-        total += progress_counters[i].progress_count;
+        total += progress_counters[i].count;
     }
     return total;
 }
@@ -165,7 +165,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         if (omp::thread_id() == 0) {
             pmi_barrier();
         }
-        //printf("all ranks done!\n");
 
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
@@ -188,9 +187,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             fflush(stdout);
         }
     }
-    //pmi_barrier();
-
-    omp::thread_barrier();
 }
 
 inline int comm_set_me_to(int core_id) {

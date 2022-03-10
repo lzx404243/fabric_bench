@@ -36,6 +36,8 @@ int rx_thread_num = 1;
 time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
+counter_t *worker_idxes;
+
 
 
 std::vector<int> prg_thread_bindings;
@@ -160,72 +162,56 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
     return nullptr;
 }
 
-void progress_loop(int id, int iter, int numReceivePerWorker) {
-    // real iteration
-    // Each worker thread is receiving a fixed number of messages
-    std::vector<int> thread_recv_count(thread_num);
-    long long& progress_counter = progress_counters[id].progress_count;
-    progress_counter = 0;
-    auto msg_count = iter / thread_num;
-    auto remainder = iter % thread_num;
-    auto finished_worker = 0;
-    for (int i = 0; i < thread_num; i++) {
-        thread_recv_count[i] = (i < remainder) ? msg_count + 1 : msg_count;
+void incrementWorkerIdx(int progress_thread_id, long long& workerIdx) {
+    workerIdx += rx_thread_num;
+    if (workerIdx >= thread_num) {
+        workerIdx = progress_thread_id;
     }
-    // Post receive requests
+}
+
+void progress_loop(int id, int numReceivePerWorker) {
+    // real iteration
+//    // Each worker thread is receiving a fixed number of messages
+//    std::vector<int> thread_recv_count(thread_num);
+    long long& progress_counter = progress_counters[id].count;
+    long long& worker_idx = worker_idxes[id].count;
+    // first worker id
+    worker_idx = id;
+    progress_counter = 0;
+    const int ANY_ID = 0;
+    // Post some receive requests first
     for (int i = id; i < thread_num; i += rx_thread_num) {
         char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
         for (int j = 0; j < numReceivePerWorker; j++) {
-            // add a bunch of recv request beforehand
-            irecv_tag_srq(device, buf, max_size, i, &srqs[id]);
+            // add a bunch of recv request beforehand(we no longer specify the worker thread id)
+            irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id]);
         }
     }
     // list of worker ids that's polled from the completion queue as requests are completed
     int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
     int numWorkersCompleted;
-    int backoff_in_ns;
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
         // Progress the receives
         numWorkersCompleted = 0;
-        //backoff_in_ns = 100;
-        while (1) {
+        while (!thread_stop.load()) {
             numWorkersCompleted = progress_new(rx_cqs[id], completed_worker_num_from_cq);
             if (numWorkersCompleted > 0) {
                 break;
             }
             progress_counter++;
-//            backoff_in_ns *= 2;
-//            sleep_for_ns(backoff_in_ns);
         }
-
         // got something from the cq
-        //for (int idx = 0; idx < numWorkersCompleted; idx++) {
-        int idx = 0;
-        // zli89: when the progress thread receives certain message
-        int worker_num = completed_worker_num_from_cq[idx];
-        ++syncs[worker_num].sync;
-        // When each worker thread receives enough, don't post receive for this thread
-        if (--thread_recv_count[worker_num] > 0) {
-            char *buf = (char *) device.heap_ptr + (2 * worker_num + 1) * max_size;
-            irecv_tag_srq(device, buf, max_size, worker_num, &srqs[id]);
-        } else {
-            // this worker is done
-            // one worker is done, phasing out.
-            if (finished_worker == 0) {
-                thread_started--;
-            }
-            // todo: this is added for support for SKIP. With this the while loop can be ended in two ways.. Also will break if
-            // thread_num / rx_thread_num is not an integer
-            // Find a better way to signal stop for the progress thread
-            if (++finished_worker == (thread_num / rx_thread_num)) {
-                break;
-            }
-        }
-        //}
+        ++syncs[worker_idx].sync;
+        // post receive for the next available worker(round-robin)
+        char *buf = (char *) device.heap_ptr + (2 * worker_idx + 1) * max_size;
+        irecv_tag_srq(device, buf, max_size, worker_idx, &srqs[id]);
+        incrementWorkerIdx(id, worker_idx);
     }
 }
+
+
 void progress_thread(int id) {
     bool bind_prg_thread = true;
     if (bind_prg_thread) {
@@ -240,9 +226,9 @@ void progress_thread(int id) {
     int cpu_num = sched_getcpu();
     fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
     int numReceivePerWorker = 1;
-    progress_loop(id, SKIP, numReceivePerWorker);
+    progress_loop(id, numReceivePerWorker);
     numReceivePerWorker = 8;
-    progress_loop(id, TOTAL, numReceivePerWorker);
+    progress_loop(id, numReceivePerWorker);
 }
 
 int main(int argc, char *argv[]) {
@@ -317,7 +303,9 @@ int main(int argc, char *argv[]) {
     // Accumulators for compute time for each thread
     compute_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
     // counters for progress for each progress thread
-    progress_counters = (counter_t *) calloc(thread_num, sizeof(counter_t));
+    progress_counters = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
+    // the index of next available workers for each progress thread
+    worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
     // Accumulators for idle time for each thread
     idle_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
     // Set up receive completion queue, one per progress thread
