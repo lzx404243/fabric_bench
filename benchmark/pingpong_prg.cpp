@@ -76,7 +76,7 @@ void progress_thread(int id) {
     if (getenv("FB_SCORE"))
         core = atoi(getenv("FB_SCORE"));
     if (bind_prg_thread)
-        comm_set_me_to(core + 2*id); // only for hyper-threaded. FIXME.
+        comm_set_me_to(core + 2 * id); // only for hyper-threaded. FIXME.
 
     ctx_t& rx_ctx = rx_ctxs[id];
     req_t *reqs = (req_t*) calloc(tx_thread_num, sizeof(req_t));

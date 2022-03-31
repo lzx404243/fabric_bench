@@ -28,7 +28,6 @@ addr_t *addrs;
 srq_t * srqs;
 
 
-
 sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
@@ -179,14 +178,9 @@ void progress_loop(int id, int numReceivePerWorker) {
     worker_idx = id;
     progress_counter = 0;
     const int ANY_ID = 0;
-    // Post some receive requests first
-    for (int i = id; i < thread_num; i += rx_thread_num) {
-        char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
-        for (int j = 0; j < numReceivePerWorker; j++) {
-            // add a bunch of recv request beforehand(we no longer specify the worker thread id)
-            irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id]);
-        }
-    }
+    // Prepost some receive requests first -- filling the receive queue
+    char *buf = (char*) device.heap_ptr + (2 * id + 1) * max_size;
+    irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], RX_QUEUE_LEN);
     // list of worker ids that's polled from the completion queue as requests are completed
     int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
     int numWorkersCompleted;
@@ -202,13 +196,18 @@ void progress_loop(int id, int numReceivePerWorker) {
             }
             progress_counter++;
         }
-        // got something from the cq
-        ++syncs[worker_idx].sync;
-        // post receive for the next available worker(round-robin)
-        char *buf = (char *) device.heap_ptr + (2 * worker_idx + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, worker_idx, &srqs[id]);
-        incrementWorkerIdx(id, worker_idx);
+        // Receive some messages
+        for (int k = 0; k < numWorkersCompleted; k++) {
+            // assign work to workers in a round-robin manner
+            ++syncs[worker_idx].sync;
+            incrementWorkerIdx(id, worker_idx);
+        }
+        // refill the receive queue with receive requests
+        buf = (char *) device.heap_ptr + (2 * worker_idx + 1) * max_size;
+        irecv_tag_srq(device, buf, max_size, worker_idx, &srqs[id], numWorkersCompleted);
     }
+
+
 }
 
 

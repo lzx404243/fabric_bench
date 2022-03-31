@@ -9,6 +9,8 @@
 
 namespace fb {
 
+const int RX_QUEUE_LEN = 4096;
+
 struct device_t {
     ibv_context *dev_ctx;
     ibv_pd *dev_pd;
@@ -123,7 +125,8 @@ static inline int free_device(device_t *device) {
 
 static inline int init_cq(device_t device, cq_t *cq) {
     // Same completion queue for send and recv work queues
-    cq->cq = ibv_create_cq(device.dev_ctx, rx_depth + 1, 0, 0, 0);
+    const int CQ_LEN = RX_QUEUE_LEN;
+    cq->cq = ibv_create_cq(device.dev_ctx, CQ_LEN, 0, 0, 0);
     if (cq->cq == 0) {
         printf("Error: Unable to create cq\n");
         exit(EXIT_FAILURE);
@@ -140,7 +143,7 @@ static inline int init_srq(device_t device, srq_t *srq) {
     // Create shared-receive queue, **number here affect performance**.
     struct ibv_srq_init_attr srq_attr;
     srq_attr.srq_context = 0;
-    srq_attr.attr.max_wr = 512;
+    srq_attr.attr.max_wr = RX_QUEUE_LEN;
     srq_attr.attr.max_sge = 1;
     srq_attr.attr.srq_limit = 0;
     srq->srq = ibv_create_srq(device.dev_pd, &srq_attr);
@@ -205,7 +208,7 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
 }
 
 static inline int progress_new(cq_t cq, int* completed_workers) {
-    const int numToPoll = 1;
+    const int numToPoll = 16;
     struct ibv_wc wc[numToPoll];
     int numCompleted;
     //printf("polling cq\n");
@@ -291,19 +294,29 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     return;
 }
 
-static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, srq_t *srq) {
+static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, srq_t *srq, int count) {
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
-            .lkey = device.heap->lkey};
+            .lkey = device.heap->lkey
+    };
+    struct ibv_recv_wr* wrs = (struct ibv_recv_wr*) malloc(sizeof(ibv_recv_wr) * count);
 
-    struct ibv_recv_wr wr = {
-            .wr_id = (uint64_t) tag,
-            .sg_list = &list,
-            .num_sge = 1,
-            };
+    for (int i = 0; i < count; i++) {
+
+        struct ibv_recv_wr wr = {
+                .wr_id = (uint64_t) tag,
+                .next = &wrs[i + 1],
+                .sg_list = &list,
+                .num_sge = 1,
+                };
+        wrs[i] = wr;
+    }
+    wrs[count - 1].next = NULL;
+
+
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(srq->srq, &wr, &bad_wr));
+    IBV_SAFECALL(ibv_post_srq_recv(srq->srq, &wrs[0], &bad_wr));
     return;
 }
 
