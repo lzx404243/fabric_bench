@@ -180,7 +180,8 @@ void progress_loop(int id, int numReceivePerWorker) {
     const int ANY_ID = 0;
     // Prepost some receive requests first -- filling the receive queue
     char *buf = (char*) device.heap_ptr + (2 * id + 1) * max_size;
-    irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], RX_QUEUE_LEN);
+    const int PREPOST_RECV_NUM = 2048;
+    irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], PREPOST_RECV_NUM);
     // list of worker ids that's polled from the completion queue as requests are completed
     int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
     int numWorkersCompleted;
