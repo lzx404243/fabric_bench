@@ -7,6 +7,7 @@
 #include <sys/param.h>
 
 namespace fb {
+const int RX_QUEUE_LEN = 4096;
 
 struct device_t {
     ibv_context *dev_ctx;
@@ -19,13 +20,13 @@ struct device_t {
     void *heap_ptr;
 };
 
-struct cq_t {
+struct alignas(64) cq_t {
     ibv_cq *cq;
 };
 
 #include "bench_ib_helper.hpp"
 
-struct ctx_t {
+struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
@@ -35,7 +36,7 @@ struct ctx_t {
     int pending;
 };
 
-struct addr_t {
+struct alignas(64) addr_t {
     conn_info remote_conn_info;
 };
 
@@ -44,10 +45,6 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
-enum {
-	PINGPONG_RECV_WRID = 1,
-	PINGPONG_SEND_WRID = 2,
-};
 
 // todo: Wild card address not implemented. Relevant only on pingpong_prg though. Ignore for now
 //const addr_t ADDR_ANY = {};
@@ -143,7 +140,8 @@ static inline int free_device(device_t *device) {
 
 static inline int init_cq(device_t device, cq_t *cq) {
     // Same completion queue for send and recv work queues
-    cq->cq = ibv_create_cq(device.dev_ctx, rx_depth + 1, 0, 0, 0);
+    const int CQ_LEN = RX_QUEUE_LEN;
+    cq->cq = ibv_create_cq(device.dev_ctx, CQ_LEN, 0, 0, 0);
     if (cq->cq == 0) {
         printf("Error: Unable to create cq\n");
         exit(EXIT_FAILURE);
@@ -238,14 +236,18 @@ static inline bool progress(cq_t cq) {
     //printf("Completed work!\n");
 
     // todo: see if the following is required
-    auto req_type = (int) wc.wr_id;
-
+    if (result == 0) {
+        return true;
+    }
+    // set result type
+    auto* req = (req_t*) wc.wr_id;
+    req->type = REQ_TYPE_NULL;
     return true;
 }
 
 static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
     //printf("entering - isend_tag\n");
-    //req->type = REQ_TYPE_PEND;
+    req->type = REQ_TYPE_PEND;
     // if (ctx.qp->state == IBV_QPS_INIT) {
     //     // todo: currently state transition happens here. Consider doing this earlier during the init phase
     //     // Same applies to irecv_tag
@@ -266,7 +268,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_send_wr wr = {
-            .wr_id = PINGPONG_SEND_WRID,
+            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -280,7 +282,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, i
 
 static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req) {
     //printf("entering - irecv_tag\n");
-    //req->type = REQ_TYPE_PEND;
+    req->type = REQ_TYPE_PEND;
 
     // if (ctx.qp->state == IBV_QPS_INIT) {
     //     //printf("Setting qp to correct state\n");
@@ -297,7 +299,7 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = PINGPONG_RECV_WRID,
+            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
     };

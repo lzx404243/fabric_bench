@@ -5,8 +5,6 @@
 
 #define PERFTEST_MAX_INLINE_SIZE 236
 
-int rx_depth = 1024;
-
 #define IBV_SAFECALL(x)                                                     \
     {                                                                       \
         int err = (x);                                                      \
@@ -62,8 +60,8 @@ static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
 			.send_cq = cq.cq,
 			.recv_cq = cq.cq,
 			.cap     = {
-				.max_send_wr  = 1,
-				.max_recv_wr  = rx_depth,
+				.max_send_wr  = 256,
+				.max_recv_wr  = RX_QUEUE_LEN,
 				.max_send_sge = 1,
 				.max_recv_sge = 1,
                 .max_inline_data = PERFTEST_MAX_INLINE_SIZE

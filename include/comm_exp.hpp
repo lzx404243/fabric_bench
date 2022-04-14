@@ -60,30 +60,25 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
     double t = 0;
     int loop = TOTAL;
     int skip = SKIP;
-    long long state;
-    long long count = 0;
-
 
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
-        if (msg_size >= LARGE) {
-            loop = TOTAL_LARGE;
-            skip = SKIP_LARGE;
+//        if (msg_size >= LARGE) {
+//            loop = TOTAL_LARGE;
+//            skip = SKIP_LARGE;
+//        }
+//
+        for (int i = iter.first; i < skip; i += iter.second) {
+            f(msg_size, i);
         }
-
-        f(msg_size, skip);
-        // for (int i = iter.first; i < skip; i += iter.second) {
-        //     f(msg_size, i, iter.first, skip - iter.second + iter.first);
-        // }
 
         omp::thread_barrier();
         //pmi_barrier();
 
         t = wall_time();
 
-        f(msg_size, loop);
-        // for (int i = iter.first; i < loop; i += iter.second) {
-        //     f(msg_size, i, iter.first, loop - iter.second + iter.first);
-        // }
+        for (int i = iter.first; i < loop; i += iter.second) {
+            f(msg_size, i);
+        }
         //pmi_barrier();
         omp::thread_barrier();
         t = wall_time() - t;
@@ -101,9 +96,10 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             fflush(stdout);
         }
     }
-    //pmi_barrier();
 
     omp::thread_barrier();
+    //pmi_barrier();
+
 }
 
 inline int comm_set_me_to(int core_id) {
