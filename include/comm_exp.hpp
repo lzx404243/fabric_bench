@@ -90,8 +90,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             double completion_time_ms = t * 1e3;
             char output_str[256];
             int used = 0;
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f",
-                             omp::thread_count(), latency, msgrate, bw, completion_time_ms);
+            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f",
+                             omp::thread_count(), latency, msgrate, bw, completion_time_ms, 0, 0, 0);
             printf("%s\n", output_str);
             fflush(stdout);
         }

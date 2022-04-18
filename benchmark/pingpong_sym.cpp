@@ -32,7 +32,9 @@ void *send_thread(void *arg) {
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
-    req_t req = {REQ_TYPE_NULL};
+    req_t req_send = {REQ_TYPE_NULL};
+    req_t req_recv = {REQ_TYPE_NULL};
+
     // printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
@@ -40,13 +42,13 @@ void *send_thread(void *arg) {
     connect_ctx(ctx, addrs[thread_id]);
     // prepost some receive
     for (int i = 0; i < RX_QUEUE_LEN - 3; i++) {
-        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req);
+        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
     }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) progress(cq);
-        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) progress(cq);
+        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
+        while (req_send.type != REQ_TYPE_NULL) progress(cq);
+        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
+        while (req_recv.type != REQ_TYPE_NULL) progress(cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
     return nullptr;
 }
@@ -62,8 +64,8 @@ void *recv_thread(void *arg) {
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
-    req_t req = {REQ_TYPE_NULL};
-
+    req_t req_send = {REQ_TYPE_NULL};
+    req_t req_recv = {REQ_TYPE_NULL};
     // printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
@@ -71,13 +73,13 @@ void *recv_thread(void *arg) {
     connect_ctx(ctx, addrs[thread_id]);
     // prepost some receive
     for (int i = 0; i < RX_QUEUE_LEN - 3; i++) {
-        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req);
+        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
     }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) progress(cq);
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req);
-        while (req.type != REQ_TYPE_NULL) progress(cq);
+        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
+        while (req_recv.type != REQ_TYPE_NULL) progress(cq);
+        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
+        while (req_send.type != REQ_TYPE_NULL) progress(cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
