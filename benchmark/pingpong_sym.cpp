@@ -19,6 +19,9 @@ cq_t *cqs;
 ctx_t *ctxs;
 addr_t *addrs;
 
+const int NUM_PREPOST_RECV = RX_QUEUE_LEN / 2;
+//const int NUM_PREPOST_RECV = 128;
+
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
     int thread_id = omp::thread_id();
@@ -41,7 +44,7 @@ void *send_thread(void *arg) {
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
     // prepost some receive
-    for (int i = 0; i < RX_QUEUE_LEN - 3; i++) {
+    for (int i = 0; i < NUM_PREPOST_RECV; i++) {
         irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
     }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
@@ -72,7 +75,7 @@ void *recv_thread(void *arg) {
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
     // prepost some receive
-    for (int i = 0; i < RX_QUEUE_LEN - 3; i++) {
+    for (int i = 0; i < NUM_PREPOST_RECV; i++) {
         irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
     }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
