@@ -20,10 +20,10 @@ static inline void comm_free() {
     pmi_finalize();
 }
 
-static inline double wtime() {
-    timeval t1;
-    gettimeofday(&t1, nullptr);
-    return t1.tv_sec + t1.tv_usec / 1e6;
+static inline double wall_time() {
+    struct timespec t1;
+    clock_gettime(CLOCK_REALTIME, &t1);
+    return t1.tv_sec + t1.tv_nsec / 1e9;
 }
 
 void write_buffer(char *buffer, int len, char input) {
@@ -75,24 +75,25 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 
         omp::thread_barrier();
         //pmi_barrier();
-        t = wtime();
+        t = wall_time();
 
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
         }
         //pmi_barrier();
         omp::thread_barrier();
-        t = wtime() - t;
+        t = wall_time() - t;
         //printf("done sending message!\n");
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
+            double completion_time_ms = t * 1e3;
 
             char output_str[256];
             int used = 0;
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f",
-                             omp::thread_count(), latency, msgrate, bw);
+            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f",
+                             omp::thread_count(), latency, msgrate, bw, completion_time_ms, 0, 0, 0);
             printf("%s\n", output_str);
             fflush(stdout);
         }

@@ -19,20 +19,20 @@ struct device_t {
     void *heap_ptr;
 };
 
-struct cq_t {
+struct alignas(64) cq_t {
     ibv_cq *cq;
 };
 
 #include "bench_ib_helper.hpp"
 
-struct ctx_t {
+struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
     int pending;
 };
 
-struct addr_t {
+struct alignas(64) addr_t {
     conn_info remote_conn_info;
 };
 

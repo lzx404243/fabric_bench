@@ -78,6 +78,8 @@ int main(int argc, char *argv[]) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * max_size);
         exit(1);
     }
+    fprintf(stderr, "version: pingpong refractored in fall\n");
+
     //printf("calling comm_init\n");
     comm_init();
     //printf("comm inited\n");
