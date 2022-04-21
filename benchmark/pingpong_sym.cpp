@@ -19,8 +19,7 @@ cq_t *cqs;
 ctx_t *ctxs;
 addr_t *addrs;
 
-const int NUM_PREPOST_RECV = RX_QUEUE_LEN / 2;
-//const int NUM_PREPOST_RECV = 128;
+const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
