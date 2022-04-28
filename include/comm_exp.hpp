@@ -9,6 +9,8 @@
 #include "config.hpp"
 #include "thread_utils.hpp"
 
+void prepost_recv(int thread_id);
+
 namespace fb {
 static inline void comm_init() {
     MLOG_Init();
@@ -70,8 +72,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-
-        //omp::thread_barrier();
+        omp::proc_barrier();
+        prepost_recv(omp::thread_id());
         //pmi_barrier();
         // synchronize the threads between two processes
         omp::proc_barrier();
@@ -97,8 +99,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             fflush(stdout);
         }
     }
+    omp::proc_barrier();
 
-    omp::thread_barrier();
     //pmi_barrier();
 
 }

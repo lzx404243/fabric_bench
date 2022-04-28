@@ -45,6 +45,10 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
+struct alignas(64) reqs_t {
+    req_t req_send = {REQ_TYPE_NULL};
+    req_t req_recv = {REQ_TYPE_NULL};
+};
 
 // todo: Wild card address not implemented. Relevant only on pingpong_prg though. Ignore for now
 //const addr_t ADDR_ANY = {};

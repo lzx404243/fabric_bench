@@ -18,8 +18,21 @@ device_t device;
 cq_t *cqs;
 ctx_t *ctxs;
 addr_t *addrs;
+reqs_t *reqs;
 
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
+
+
+void prepost_recv(int thread_id) {
+    ctx_t &ctx = ctxs[thread_id];
+    char *buf = (char *) device.heap_ptr + thread_id * max_size;
+    req_t& req_recv = reqs[thread_id].req_recv;
+    for (int i = 0; i < NUM_PREPOST_RECV; i++) {
+        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
+    }
+}
+
+
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -34,18 +47,14 @@ void *send_thread(void *arg) {
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
-    req_t req_send = {REQ_TYPE_NULL};
-    req_t req_recv = {REQ_TYPE_NULL};
+    req_t& req_send = reqs[thread_id].req_send;
+    req_t& req_recv = reqs[thread_id].req_recv;
 
     // printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
-    // prepost some receive
-    for (int i = 0; i < NUM_PREPOST_RECV; i++) {
-        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
-    }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
         while (req_send.type != REQ_TYPE_NULL) progress(cq);
@@ -66,17 +75,13 @@ void *recv_thread(void *arg) {
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
-    req_t req_send = {REQ_TYPE_NULL};
-    req_t req_recv = {REQ_TYPE_NULL};
+    req_t& req_send = reqs[thread_id].req_send;
+    req_t& req_recv = reqs[thread_id].req_recv;
     // printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
-    // prepost some receive
-    for (int i = 0; i < NUM_PREPOST_RECV; i++) {
-        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
-    }
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
         while (req_recv.type != REQ_TYPE_NULL) progress(cq);
@@ -86,6 +91,7 @@ void *recv_thread(void *arg) {
 
     return nullptr;
 }
+
 
 int main(int argc, char *argv[]) {
     fprintf(stderr, "pingpong_sym from summer TOTAL+skip");
@@ -115,6 +121,8 @@ int main(int argc, char *argv[]) {
     cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
     ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
+    reqs = (reqs_t*) calloc(thread_num, sizeof(reqs_t));
+
     //printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &cqs[i]);
