@@ -71,9 +71,10 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             f(msg_size, i);
         }
 
-        omp::thread_barrier();
+        //omp::thread_barrier();
         //pmi_barrier();
-
+        // synchronize the threads between two processes
+        omp::proc_barrier();
         t = wall_time();
 
         for (int i = iter.first; i < loop; i += iter.second) {

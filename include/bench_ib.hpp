@@ -216,25 +216,25 @@ static inline bool progress(cq_t cq) {
     struct ibv_wc wc;
     int result;
     //printf("Start polling\n");
-    do {
-        result = ibv_poll_cq(cq.cq, 1, &wc);
-    } while (result == 0);
+
+    result = ibv_poll_cq(cq.cq, 1, &wc);
     //printf("Done polling\n");
 
     if (result < 0) {
         printf("Error: ibv_poll_cq() failed\n");
         exit(EXIT_FAILURE);
     }
-
+    if (result == 0) {
+        return true;
+    }
     if (wc.status != ibv_wc_status::IBV_WC_SUCCESS) {
         printf("Error: Failed status %s (%d)\n",
                ibv_wc_status_str(wc.status),
                wc.status);
         exit(EXIT_FAILURE);
     }
-    // Success
 
-    // set result type
+    // got completed entry from cq. set result type
     auto* req = (req_t*) wc.wr_id;
     req->type = REQ_TYPE_NULL;
     return true;

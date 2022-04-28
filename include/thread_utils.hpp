@@ -26,6 +26,15 @@ static inline void thread_barrier()
     MLOG_DBG_Log(MLOG_LOG_DEBUG, "Thread %d leave barrier.\n", thread_id());
 }
 
+static inline void proc_barrier()
+{
+    thread_barrier();
+    if (omp::thread_id() == 0) {
+        pmi_barrier();
+    }
+    thread_barrier();
+}
+
 static inline void thread_run(func_t f, int n)
 {
 #pragma omp parallel num_threads(n)
