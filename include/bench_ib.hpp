@@ -233,12 +233,7 @@ static inline bool progress(cq_t cq) {
         exit(EXIT_FAILURE);
     }
     // Success
-    //printf("Completed work!\n");
 
-    // todo: see if the following is required
-    if (result == 0) {
-        return true;
-    }
     // set result type
     auto* req = (req_t*) wc.wr_id;
     req->type = REQ_TYPE_NULL;
