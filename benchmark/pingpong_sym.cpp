@@ -22,6 +22,10 @@ reqs_t *reqs;
 
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 
+// time measurement for the loops
+std::vector<std::vector<double>> checkpointTimesAll;
+std::vector<std::vector<double>> checkpointTimesAllSkip;
+std::vector<double> totalExecTimes;
 
 void prepost_recv(int thread_id) {
     ctx_t &ctx = ctxs[thread_id];
@@ -122,6 +126,11 @@ int main(int argc, char *argv[]) {
     ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
     reqs = (reqs_t*) calloc(thread_num, sizeof(reqs_t));
+
+    // time measurement for the loops
+    checkpointTimesAll.reserve(thread_num);
+    checkpointTimesAllSkip.reserve(thread_num);
+    totalExecTimes.reserve(thread_num);
 
     //printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
