@@ -11,10 +11,12 @@
 #include <vector>
 #include <math.h>
 #include <numeric> // std::adjacent_difference
+#include <algorithm>
 
 extern std::vector<std::vector<double>> checkpointTimesAll;
 extern std::vector<std::vector<double>> checkpointTimesAllSkip;
 extern std::vector<double> totalExecTimes;
+extern omp_lock_t writelock;
 
 void prepost_recv(int thread_id);
 
@@ -31,7 +33,7 @@ static inline void comm_free() {
 
 static inline double wall_time() {
     struct timespec t1;
-    clock_gettime(CLOCK_REALTIME, &t1);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     return t1.tv_sec + t1.tv_nsec / 1e9;
 }
 
@@ -70,11 +72,12 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
     double t_skip = 0;
     double t_finish_thread = 0;
     int loop = TOTAL;
-    int skip = SKIP;
+    //int skip = 0;
+    int skip = 10240;
     std::vector<double> checkpointTimesThread;
     std::vector<double> checkpointTimesSkipThread;
 
-    int checkpointStep = 100;
+    int checkpointStep = 1000;
     int numCheckPointsSkipPerWorker = ceil(skip / (omp::thread_count() * checkpointStep));
     int numCheckPointsPerWorker = ceil(loop / (omp::thread_count() * checkpointStep));
 
@@ -90,7 +93,10 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
 //
         // prepost receives
         prepost_recv(omp::thread_id());
+        //omp::proc_barrier();
         omp::thread_barrier();
+        int messageIdx = 0;
+
         // start skip loop
         t_skip = wall_time();
         for (int i = iter.first; i < skip; i += iter.second) {
@@ -98,30 +104,42 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             if (++cnt % checkpointStep == 0) {
                 checkpointTimesSkipThread.push_back(wall_time() - t_skip);
             }
+            //printf("thread %d finished skip %d\n", omp::thread_id(), messageIdx++);
+
         }
-//        omp::proc_barrier();
+        //printf("skip done for thread %d, rank %d\n", omp::thread_id(), pmi_get_rank());
+        cnt = 0;
 //        prepost_recv(omp::thread_id());
 //        //pmi_barrier();
 //        // synchronize the threads between two processes
-//        omp::proc_barrier();
-        cnt = 0;
+        //omp::proc_barrier();
         omp::thread_barrier();
+//        if (omp::thread_id() == 0)
+//        printf("skip done for all on rank %d!\n", pmi_get_rank());
+
         t = wall_time();
+        messageIdx = 0;
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
             if (++cnt % checkpointStep == 0) {
                 checkpointTimesThread.push_back(wall_time() - t);
             }
+            //printf("thread %d finished loop %d\n", omp::thread_id(), messageIdx++);
         }
         //pmi_barrier();
         t_finish_thread = wall_time() - t;
+        //printf("regular loop done for thread %d, rank %d\n", omp::thread_id(), pmi_get_rank());
         omp::thread_barrier();
-        t = wall_time() - t;
+//        if (omp::thread_id() == 0)
+//            printf("regular loop done for all on rank %d!\n", pmi_get_rank());
+        omp_set_lock(&writelock);
         totalExecTimes[omp::thread_id()] = t_finish_thread;
         checkpointTimesAllSkip[omp::thread_id()] = checkpointTimesSkipThread;
         checkpointTimesAll[omp::thread_id()] = checkpointTimesThread;
-
+        omp_unset_lock(&writelock);
         omp::thread_barrier();
+        t = *std::max_element(totalExecTimes.begin(), totalExecTimes.end());
+
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;

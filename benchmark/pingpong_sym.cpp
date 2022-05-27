@@ -21,6 +21,9 @@ addr_t *addrs;
 reqs_t *reqs;
 
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
+//const int NUM_PREPOST_RECV = 0;
+
+omp_lock_t writelock;
 
 // time measurement for the loops
 std::vector<std::vector<double>> checkpointTimesAll;
@@ -128,9 +131,11 @@ int main(int argc, char *argv[]) {
     reqs = (reqs_t*) calloc(thread_num, sizeof(reqs_t));
 
     // time measurement for the loops
-    checkpointTimesAll.reserve(thread_num);
-    checkpointTimesAllSkip.reserve(thread_num);
-    totalExecTimes.reserve(thread_num);
+    checkpointTimesAll.resize(thread_num);
+    checkpointTimesAllSkip.resize(thread_num);
+    totalExecTimes.resize(thread_num);
+    // omp mutex
+    omp_init_lock(&writelock);
 
     //printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
@@ -157,6 +162,8 @@ int main(int argc, char *argv[]) {
         free_ctx(&ctxs[i]);
         free_cq(&cqs[i]);
     }
+    omp_destroy_lock(&writelock);
+
     free_device(&device);
     free(addrs);
     free(ctxs);

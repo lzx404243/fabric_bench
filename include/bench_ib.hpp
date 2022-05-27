@@ -144,7 +144,7 @@ static inline int free_device(device_t *device) {
 
 static inline int init_cq(device_t device, cq_t *cq) {
     // Same completion queue for send and recv work queues
-    const int CQ_LEN = RX_QUEUE_LEN;
+    const int CQ_LEN = RX_QUEUE_LEN + 1;
     cq->cq = ibv_create_cq(device.dev_ctx, CQ_LEN, 0, 0, 0);
     if (cq->cq == 0) {
         printf("Error: Unable to create cq\n");
