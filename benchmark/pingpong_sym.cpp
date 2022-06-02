@@ -15,7 +15,9 @@ int max_size = 64 * 1024;
 bool touch_data = false;
 int rank, size, target_rank;
 device_t device;
-cq_t *cqs;
+cq_t *send_cqs;
+cq_t *recv_cqs;
+
 ctx_t *ctxs;
 addr_t *addrs;
 reqs_t *reqs;
@@ -47,7 +49,9 @@ void *send_thread(void *arg) {
     int thread_count = omp::thread_count();
     int cpu_num = sched_getcpu();
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
-    cq_t &cq = cqs[thread_id];
+    cq_t &send_cq = send_cqs[thread_id];
+    cq_t &recv_cq = recv_cqs[thread_id];
+
     ctx_t &ctx = ctxs[thread_id];
     // todo: zheli -- the following is a hack to specify the thread as a sending thread
     ctx.mode = CTX_TX;
@@ -64,9 +68,9 @@ void *send_thread(void *arg) {
     connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
-        while (req_send.type != REQ_TYPE_NULL) progress(cq);
+        while (req_send.type != REQ_TYPE_NULL) progress(send_cq);
         irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
-        while (req_recv.type != REQ_TYPE_NULL) progress(cq);
+        while (req_recv.type != REQ_TYPE_NULL) progress(recv_cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
     return nullptr;
 }
@@ -75,7 +79,9 @@ void *recv_thread(void *arg) {
     //printf("I am a recv thread\n");
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
-    cq_t &cq = cqs[thread_id];
+    cq_t &send_cq = send_cqs[thread_id];
+    cq_t &recv_cq = recv_cqs[thread_id];
+
     ctx_t &ctx = ctxs[thread_id];
     ctx.mode = CTX_RX;
 
@@ -91,9 +97,9 @@ void *recv_thread(void *arg) {
     connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
-        while (req_recv.type != REQ_TYPE_NULL) progress(cq);
+        while (req_recv.type != REQ_TYPE_NULL) progress(recv_cq);
         isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
-        while (req_send.type != REQ_TYPE_NULL) progress(cq);
+        while (req_send.type != REQ_TYPE_NULL) progress(send_cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     return nullptr;
@@ -125,7 +131,9 @@ int main(int argc, char *argv[]) {
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
 
-    cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
+    // separate completion queues for send and receive
+    send_cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
+    recv_cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
     ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
     addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
     reqs = (reqs_t*) calloc(thread_num, sizeof(reqs_t));
@@ -139,8 +147,9 @@ int main(int argc, char *argv[]) {
 
     //printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
-        init_cq(device, &cqs[i]);
-        init_ctx(&device, cqs[i], &ctxs[i], CTX_TX | CTX_RX);
+        init_cq(device, &send_cqs[i]);
+        init_cq(device, &recv_cqs[i]);
+        init_ctx(&device, send_cqs[i], recv_cqs[i], &ctxs[i], CTX_TX | CTX_RX);
         put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();
@@ -160,14 +169,16 @@ int main(int argc, char *argv[]) {
     //printf("Done: Freeing resources\n");
     for (int i = 0; i < thread_num; ++i) {
         free_ctx(&ctxs[i]);
-        free_cq(&cqs[i]);
+        free_cq(&send_cqs[i]);
+        free_cq(&recv_cqs[i]);
     }
     omp_destroy_lock(&writelock);
 
     free_device(&device);
     free(addrs);
     free(ctxs);
-    free(cqs);
+    free(send_cqs);
+    free(recv_cqs);
     comm_free();
     return 0;
 }

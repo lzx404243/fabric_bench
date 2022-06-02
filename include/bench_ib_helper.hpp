@@ -36,7 +36,7 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
     return ibv_reg_mr(device->dev_pd, ptr, size, mr_flags);
 }
 
-static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
+static inline ibv_qp *qp_create(device_t *device, cq_t send_cq, cq_t recv_cq) {
 
     // todo: investigate why the commented out code cause intermittant segfault...(Does it resolve by adding a scope)
     // struct ibv_qp_init_attr qp_init_attr;
@@ -57,8 +57,8 @@ static inline ibv_qp *qp_create(device_t *device, cq_t cq) {
 
     {
 		struct ibv_qp_init_attr qp_init_attr = {
-			.send_cq = cq.cq,
-			.recv_cq = cq.cq,
+			.send_cq = send_cq.cq,
+			.recv_cq = recv_cq.cq,
 			.cap     = {
 				.max_send_wr  = 256,
 				.max_recv_wr  = RX_QUEUE_LEN,

@@ -158,9 +158,9 @@ static inline int free_cq(cq_t *cq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t cq, ctx_t *ctx, uint64_t mode) {
+static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, ctx_t *ctx, uint64_t mode) {
     // Create and initialize queue pair
-    ctx->qp = qp_create(device, cq);
+    ctx->qp = qp_create(device, send_cq, recv_cq);
     ctx->device = device;
     qp_init(ctx->qp, (int) device->dev_port);
 
