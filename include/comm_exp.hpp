@@ -71,8 +71,10 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
     double t = 0;
     double t_skip = 0;
     double t_finish_thread = 0;
-    int loop = TOTAL;
-    //int skip = 0;
+    // 20m messages
+    int loop = TOTAL * 500;
+    // 40k messages
+    //int loop = TOTAL;
     int skip = 10240;
     std::vector<double> checkpointTimesThread;
     std::vector<double> checkpointTimesSkipThread;
