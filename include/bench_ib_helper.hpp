@@ -17,12 +17,8 @@
         ;
 
 struct conn_info {
-    // the following two fields are relevant only for rdma read/write, not send
-    //uint64_t addr;
-    //uint32_t rkey;
     uint32_t qp_num;
     uint16_t lid;
-    union ibv_gid gid;
 };
 
 static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
@@ -36,29 +32,19 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
     return ibv_reg_mr(device->dev_pd, ptr, size, mr_flags);
 }
 
-static inline ibv_qp *qp_create(device_t *device, cq_t send_cq, cq_t recv_cq) {
+static inline ibv_qp *qp_create(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq) {
 
-    // todo: investigate why the commented out code cause intermittant segfault...(Does it resolve by adding a scope)
-    // struct ibv_qp_init_attr qp_init_attr;
-    // printf("setting up qp init attr\n");
-    // //qp_init_attr.qp_context = 0;
-    // qp_init_attr.send_cq = cq.cq;
-    // qp_init_attr.recv_cq = cq.cq;
-
-    // printf("done setting up srq\n");
-    // qp_init_attr.cap.max_send_wr = 256;//(uint32_t)dev_attr->max_qp_wr;
-    // qp_init_attr.cap.max_recv_wr = 1;  //(uint32_t)dev_attr->max_qp_wr;
-    // // -- this affect the size of (TODO:tune later).
-    // qp_init_attr.cap.max_send_sge = 16;// this allows 128 inline.
-    // qp_init_attr.cap.max_recv_sge = 1;
-    // qp_init_attr.cap.max_inline_data = 0;
-    // qp_init_attr.qp_type = IBV_QPT_RC;
-    // qp_init_attr.sq_sig_all = 0;
-
+static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq, srq_t srq) {
+    // todo: use LCI parameter for the below
+    // todo: modify srq assignemnt below to account for the case where srq isn't used
     {
 		struct ibv_qp_init_attr qp_init_attr = {
 			.send_cq = send_cq.cq,
 			.recv_cq = recv_cq.cq,
+            .srq     = srq.srq,
+			.send_cq = cq.cq,
+			.recv_cq = rx_cq.cq,
+			.srq     = srq.srq,
 			.cap     = {
 				.max_send_wr  = 256,
 				.max_recv_wr  = RX_QUEUE_LEN,
@@ -97,7 +83,6 @@ static inline void qp_init(struct ibv_qp *qp, int port) {
 static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
                              struct ibv_port_attr *port_attr,
                              struct conn_info *rctx_) {
-    //printf("entering qp_to_rtr\n");
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
 
@@ -114,9 +99,6 @@ static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
     attr.ah_attr.src_path_bits = 0;
     attr.ah_attr.port_num = dev_port;
 
-    // memcpy(&attr.ah_attr.grh.dgid, &rctx_->gid, 16);
-    // attr.ah_attr.grh.sgid_index = 0;// gid
-
     int flags = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
                 IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
 
@@ -125,13 +107,9 @@ static inline void qp_to_rtr(struct ibv_qp *qp, int dev_port,
         fprintf(stderr, "failed to modify QP state to RTR\n");
         exit(EXIT_FAILURE);
     }
-    //printf("done - qp_to_rtr\n");
-
 }
 
 static inline void qp_to_rts(struct ibv_qp *qp) {
-    //printf("entering qp_to_rts\n");
-
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
 
@@ -149,5 +127,4 @@ static inline void qp_to_rts(struct ibv_qp *qp) {
         fprintf(stderr, "failed to modify QP state to RTS\n");
         exit(EXIT_FAILURE);
     }
-    //printf("Done - qp_to_rts updated\n");
 }

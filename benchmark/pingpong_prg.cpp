@@ -76,7 +76,7 @@ void progress_thread(int id) {
     if (getenv("FB_SCORE"))
         core = atoi(getenv("FB_SCORE"));
     if (bind_prg_thread)
-        comm_set_me_to(core + 2*id); // only for hyper-threaded. FIXME.
+        comm_set_me_to(core + 2 * id); // only for hyper-threaded. FIXME.
 
     ctx_t& rx_ctx = rx_ctxs[id];
     req_t *reqs = (req_t*) calloc(tx_thread_num, sizeof(req_t));
@@ -91,6 +91,7 @@ void progress_thread(int id) {
         bool ret = progress(rx_cqs[id]);
         if (ret) {
             for (int i = id; i < tx_thread_num; i += rx_thread_num) {
+                // zli89: when the progress thread receives certain message
                 if (reqs[i].type == REQ_TYPE_NULL) {
                     syncs[i] = 1;
                     char *buf = (char*) device.heap_ptr + (2 * i + 1) * max_size;
