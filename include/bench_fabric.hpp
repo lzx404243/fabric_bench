@@ -12,8 +12,8 @@ namespace fb {
  * Context mode
  */
 enum ctx_mode_t {
-    CTX_TX, /**< Transmit context */
-    CTX_RX  /**< Receive context */
+    CTX_TX = 1ULL << 0, /** Transmit context */
+    CTX_RX = 1ULL << 1,  /** Receive context */
 };
 
 /**
@@ -34,6 +34,8 @@ struct device_t;
  * A completion queue is created on a device and can be associated with one or more context
  */
 struct cq_t;
+// todo: add documentation
+struct srq_t;
 /**
  * A context, the unit of thread parallelism for communication
  *
@@ -129,9 +131,9 @@ static inline int get_ctx_addr(device_t device, int rank, int id, addr_t *addr);
 /**
  * make progress on the completion queue.
  * @param[in] cq completion queue object to make progress on.
- * @return true if a pending request has been completed, false otherwise.
+ * @return the number of completed request.
  */
-static inline bool progress(cq_t cq);
+static inline int progress(cq_t cq);
 /**
  * Asynchronously send a message with a tag
  * @param[in] ctx    A context object to send the message.
@@ -167,6 +169,9 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
 #endif
 #ifdef FB_USE_IBV
 #include "bench_ib.hpp"
+#endif
+#ifdef FB_USE_UCX
+#include "bench_ucx.hpp"
 #endif
 
 #endif//FABRICBENCH_FABRIC_BENCH_HPP

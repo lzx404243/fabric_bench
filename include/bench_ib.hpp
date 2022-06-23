@@ -9,8 +9,6 @@
 
 namespace fb {
 
-const int RX_QUEUE_LEN = 4096;
-
 struct device_t {
     ibv_context *dev_ctx;
     ibv_pd *dev_pd;
@@ -31,41 +29,21 @@ struct srq_t {
     char pad[64 - sizeof(ibv_srq*)];
 };
 
+// todo: consider modify placement of the following
 #include "bench_ib_helper.hpp"
 
 struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
-    int pending;
+    ibv_srq *srq = nullptr;
 };
 
 struct alignas(64) addr_t {
     conn_info remote_conn_info;
 };
 
-struct req_t {
-    alignas(64) volatile req_type_t type;// change to atomic
-    char pad[64 - sizeof(req_type_t)];
-};
-
-struct alignas(64) reqs_t {
-    req_t req_send = {REQ_TYPE_NULL};
-    req_t req_recv = {REQ_TYPE_NULL};
-}
-
-struct alignas(64) time_acc_t {
-    double tot_time_us = 0;
-};
-
-struct alignas(64) counter_t {
-    long long count = 0;
-};
-
-struct sync_t {
-    alignas(64) std::atomic<int> sync;
-    char pad[64 - sizeof(std::atomic<int>)];
-};
+const addr_t ADDR_ANY = {};
 
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
@@ -151,32 +129,53 @@ static inline int init_srq(device_t device, srq_t *srq) {
     srq_attr.attr.max_sge = 1;
     srq_attr.attr.srq_limit = 0;
     srq->srq = ibv_create_srq(device.dev_pd, &srq_attr);
-    if (srq->srq == 0) {
+    if (!srq->srq) {
         fprintf(stderr, "Could not create shared received queue\n");
         exit(EXIT_FAILURE);
     }
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, ctx_t *ctx, srq_t srq) {
-    // Create and initialize queue pair
-    ctx->qp = qp_create(device, send_cq, rx_cq, srq);
+static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode) {
     ctx->device = device;
+    if (mode == CTX_RX) {
+        // receive-only context. Only need to set the share receive queue
+        ctx->srq = srq.srq;
+        return FB_OK;
+    }
+    // Create and initialize queue pair
+    ctx->qp = qp_create(device, send_cq, recv_cq, srq);
     qp_init(ctx->qp, (int) device->dev_port);
-
-    // Save local conn info in ctx
+    // Save local conn info in ctx for later exchange
     struct conn_info *local_conn_info = &ctx->local_conn_info;
     local_conn_info->qp_num = ctx->qp->qp_num;
     local_conn_info->lid = device->port_attr.lid;
+
     return FB_OK;
 }
 
 static inline int free_ctx(ctx_t *ctx) {
-    IBV_SAFECALL(ibv_destroy_qp(ctx->qp));
-    ctx->qp = nullptr;
+    if (ctx->qp) {
+        IBV_SAFECALL(ibv_destroy_qp(ctx->qp));
+        ctx->qp = nullptr;
+    }
+    if (ctx->srq) {
+        IBV_SAFECALL(ibv_destroy_srq(ctx->srq));
+        ctx->srq = nullptr;
+    }
     // todo: might need to free ctx->local_conn_info
     return FB_OK;
 }
+
+static inline int get_num_ctx_addr(int num_sender, int num_receiver) {
+    // only the sender has queue pair that needs to be addressed
+    return num_sender;
+}
+
+static inline ctx_t* get_exchanged_ctxs(ctx_t* tx_ctxs, ctx_t* rx_ctxs) {
+    return tx_ctxs;
+}
+
 static inline int put_ctx_addr(ctx_t ctx, int id) {
     int comm_rank = pmi_get_rank();
     char key[256];
@@ -211,8 +210,9 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline bool progress(cq_t cq) {
-    const int numToPoll = 1;
+static inline int progress(cq_t cq) {
+    // todo: make the following as config, along with other things else
+    const int numToPoll = 16;
     struct ibv_wc wc[numToPoll];
     int numCompleted;
     numCompleted = ibv_poll_cq(cq.cq, numToPoll, wc);
@@ -222,11 +222,6 @@ static inline bool progress(cq_t cq) {
         exit(EXIT_FAILURE);
     }
 
-    // No completion event
-    if (numCompleted == 0) {
-        return 0;
-    }
-
     for (int i = 0; i < numCompleted; i++) {
         if (wc[i].status != ibv_wc_status::IBV_WC_SUCCESS) {
             printf("Error: Failed status %s (%d)\n",
@@ -234,15 +229,12 @@ static inline bool progress(cq_t cq) {
                    wc[i].status);
             exit(EXIT_FAILURE);
         }
-        // got completed entry from cq. set result type
-        auto* req = (req_t*) wc.wr_id[i];
-        req->type = REQ_TYPE_NULL;
     }
     return numCompleted;
 }
 
-static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
-    req->type = REQ_TYPE_PEND;
+static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target) {
+
     int send_flags = IBV_SEND_SIGNALED;
     if (size < PERFTEST_MAX_INLINE_SIZE) {
         send_flags |= IBV_SEND_INLINE;
@@ -253,7 +245,6 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
             .lkey = ctx.device->heap->lkey};
 
     struct ibv_send_wr wr = {
-            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -264,46 +255,39 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
     return;
 }
 
-// used in symmetric setup, but not the progress thread one
-static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
-    req->type = REQ_TYPE_PEND;
+static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+    if (count == 0) {
+        return;
+    }
+    struct ibv_recv_wr wrs[count];
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
-            .lkey = ctx.device->heap->lkey};
-    struct ibv_recv_wr wr = {
-            .wr_id = (uintptr_t)req,
-            .sg_list = &list,
-            .num_sge = 1,
+            .lkey = ctx.device->heap->lkey
     };
-    struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_recv(ctx.qp, &wr, &bad_wr));
-    return;
-}
-
-static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, srq_t *srq, int count) {
-    struct ibv_sge list = {
-            .addr = (uintptr_t) src,
-            .length = size,
-            .lkey = device.heap->lkey
-    };
-    struct ibv_recv_wr* wrs = (struct ibv_recv_wr*) malloc(sizeof(ibv_recv_wr) * count);
-
     for (int i = 0; i < count; i++) {
-
         struct ibv_recv_wr wr = {
-                .wr_id = (uint64_t) tag,
+                .wr_id = (uint64_t) 0,
                 .next = &wrs[i + 1],
                 .sg_list = &list,
                 .num_sge = 1,
-                };
+        };
         wrs[i] = wr;
     }
     wrs[count - 1].next = NULL;
-
-
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(srq->srq, &wrs[0], &bad_wr));
+    if (ctx.srq) {
+        IBV_SAFECALL(ibv_post_srq_recv(ctx.srq, &wrs[0], &bad_wr));
+    } else {
+        IBV_SAFECALL(ibv_post_recv(ctx.qp, &wrs[0], &bad_wr));
+    }
+
+}
+
+static inline void irecv_srq(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+
+    // todo: no need to malloc.
+
     return;
 }
 

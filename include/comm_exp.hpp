@@ -15,22 +15,30 @@
 #include <algorithm>
 
 extern int rx_thread_num;
-extern std::atomic<int> thread_started;
-extern fb::time_acc_t * compute_time_accs;
-extern fb::time_acc_t * idle_time_accs;
-extern fb::sync_t *syncs;
 extern int prefilled_work;
-extern fb::counter_t* progress_counters;
+extern bool show_extra_stats;
+std::vector<std::vector<double>> checkpointTimesAll;
+std::vector<std::vector<double>> checkpointTimesAllSkip;
+std::vector<double> totalExecTimes;
+omp_lock_t writelock;
 
-
-extern std::vector<std::vector<double>> checkpointTimesAll;
-extern std::vector<std::vector<double>> checkpointTimesAllSkip;
-extern std::vector<double> totalExecTimes;
-extern omp_lock_t writelock;
-
-void prepost_recv(int thread_id);
+// functions implemented in the application
+void reset_counters(int);
+std::tuple<double, double, long long> get_additional_stats();
 
 namespace fb {
+
+struct alignas(64) time_acc_t {
+    double tot_time_us = 0;
+};
+
+struct alignas(64) counter_t {
+    long long count = 0;
+};
+
+struct alignas(64) sync_t {
+    std::atomic<int> sync;
+};
 
 static inline void comm_init() {
     MLOG_Init();
@@ -42,7 +50,7 @@ static inline void comm_free() {
     pmi_finalize();
 }
 
-static inline void sleep_for_us(int compute_time_in_us, time_acc_t & time_acc) {
+static inline void sleep_for_us(int compute_time_in_us, time_acc_t& time_acc) {
     struct timespec start, stop;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
     while (1) {
@@ -50,26 +58,10 @@ static inline void sleep_for_us(int compute_time_in_us, time_acc_t & time_acc) {
         double elapsed_us = ( stop.tv_nsec - start.tv_nsec ) / 1e3
                 + ( stop.tv_sec - start.tv_sec ) * 1e6;
         if (elapsed_us >= compute_time_in_us) {
-            //printf("time elapsed: %lf\n", elapsed_us);
             time_acc.tot_time_us += elapsed_us;
             break;
         }
     }
-    return;
-}
-
-static inline void sleep_for_ns(int compute_time_in_ns) {
-    struct timespec start, stop;
-    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-    while (1) {
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &stop);
-        double elapsed_us = ( stop.tv_nsec - start.tv_nsec)
-                + ( stop.tv_sec - start.tv_sec ) * 1e9;
-        if (elapsed_us >= compute_time_in_ns) {
-            break;
-        }
-    }
-    return;
 }
 
 static inline double wall_time() {
@@ -137,22 +129,22 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             loop = TOTAL_LARGE;
             skip = SKIP_LARGE;
         }
-        // prepost receives
-        prepost_recv(omp::thread_id());
-        omp::thread_barrier();
+        reset_counters(0);
+        omp::proc_barrier();
         // warm up loop
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-        omp::thread_barrier();
+        omp::proc_barrier();
+        reset_counters(prefilled_work);
+        omp::proc_barrier();
         t = wall_time();
-        messageIdx = 0;
+        //int counter = 0;
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
-            if (++cnt % checkpointStep == 0) {
-                checkpointTimesThread.push_back(wall_time() - t);
-            }
+            //printf("thread %d -- rank %d finishes iter %d\n", omp::thread_id(), pmi_get_rank(), counter++);
         }
+        //printf("thread %d -- rank %d done with all\n", omp::thread_id(), pmi_get_rank());
         omp::thread_barrier();
         t = wall_time() - t;
 
@@ -161,14 +153,16 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
             double completion_time_ms = t * 1e3;
-            double compute_time_ms = get_overhead(compute_time_accs);
-            long long progress_counter_sum = get_progress_total(progress_counters);
-            double idle_time_ms = get_overhead(idle_time_accs);
-
+            double compute_time_ms = 0;
+            double idle_time_ms = 0;
+            long long progress_counter_sum = 0;
+            if (show_extra_stats) {
+                std::tie(compute_time_ms, idle_time_ms, progress_counter_sum) = get_additional_stats();
+            }
             char output_str[256];
             int used = 0;
-            used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f",
-                             omp::thread_count(), latency, msgrate, bw, completion_time_ms, 0, 0, 0);
+            used += snprintf(output_str + used, 256, "%-10lu %-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-19Lu",
+                             msg_size, omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms, progress_counter_sum);
             printf("%s\n", output_str);
             fflush(stdout);
         }

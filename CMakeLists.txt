@@ -13,19 +13,28 @@ check_c_source_compiles(
     HAVE_RESTRICT
 )
 
-set(FB_SERVER ibv CACHE STRING "Server: ofi MPI ibv")
+set(FB_SERVER UCX CACHE STRING "Server: OFI MPI IBV UCX")
 
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 
 find_package(OpenMP REQUIRED)
-if("ofi" IN_LIST FB_SERVER)
+if("OFI" IN_LIST FB_SERVER)
     find_package(Fabric REQUIRED)
     set(FB_USE_OFI ON)
 endif()
 
-if("ibv" IN_LIST FB_SERVER)
+if("IBV" IN_LIST FB_SERVER)
     find_package(Fabric REQUIRED)
     set(FB_USE_IBV ON)
+endif()
+
+if("UCX" IN_LIST FB_SERVER)
+    find_package(
+            UCX
+            REQUIRED COMPONENTS ucp uct ucs
+            HINTS ENV UCX_ROOT
+    )
+    set(FB_USE_UCX ON)
 endif()
 
 configure_file(include/config.hpp.in include/config.hpp @ONLY)
@@ -39,9 +48,16 @@ target_include_directories(fb_lib INTERFACE
 target_link_libraries(fb_lib INTERFACE
         mlog-obj
         pmi-obj
-        Fabric::IBV
         OpenMP::OpenMP_CXX
 )
+
+if(("IBV" IN_LIST FB_SERVER) OR ("OFI" IN_LIST FB_SERVER))
+    target_link_libraries(fb_lib INTERFACE Fabric::${FB_SERVER})
+endif()
+
+if("UCX" IN_LIST FB_SERVER)
+    target_link_libraries(fb_lib INTERFACE ucx::uct ucx::ucs)
+endif()
 
 option(USE_GPROF "use gprof" OFF)
 if (USE_GPROF)
