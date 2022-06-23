@@ -33,17 +33,10 @@ static inline struct ibv_mr *ibv_mem_malloc(device_t *device, size_t size) {
 }
 
 static inline ibv_qp *qp_create(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq) {
-
-static inline ibv_qp *qp_create(device_t *device, cq_t cq, cq_t rx_cq, srq_t srq) {
-    // todo: use LCI parameter for the below
-    // todo: modify srq assignemnt below to account for the case where srq isn't used
     {
 		struct ibv_qp_init_attr qp_init_attr = {
 			.send_cq = send_cq.cq,
 			.recv_cq = recv_cq.cq,
-            .srq     = srq.srq,
-			.send_cq = cq.cq,
-			.recv_cq = rx_cq.cq,
 			.srq     = srq.srq,
 			.cap     = {
 				.max_send_wr  = 256,

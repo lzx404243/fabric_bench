@@ -14,19 +14,19 @@
 #include <numeric> // std::adjacent_difference
 #include <algorithm>
 
-extern int rx_thread_num;
-extern std::atomic<int> thread_started;
-extern fb::time_acc_t * compute_time_accs;
-extern fb::time_acc_t * idle_time_accs;
-extern fb::sync_t *syncs;
-extern int prefilled_work;
-extern fb::counter_t* progress_counters;
+int rx_thread_num;
+//extern std::atomic<int> thread_started;
+//extern fb::time_acc_t * compute_time_accs;
+//extern fb::time_acc_t * idle_time_accs;
+//extern fb::sync_t *syncs;
+//extern int prefilled_work;
+//extern fb::counter_t* progress_counters;
 
 
-extern std::vector<std::vector<double>> checkpointTimesAll;
-extern std::vector<std::vector<double>> checkpointTimesAllSkip;
-extern std::vector<double> totalExecTimes;
-extern omp_lock_t writelock;
+std::vector<std::vector<double>> checkpointTimesAll;
+std::vector<std::vector<double>> checkpointTimesAllSkip;
+std::vector<double> totalExecTimes;
+omp_lock_t writelock;
 
 void prepost_recv(int thread_id);
 
@@ -146,24 +146,21 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         }
         omp::thread_barrier();
         t = wall_time();
-        messageIdx = 0;
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
-            if (++cnt % checkpointStep == 0) {
-                checkpointTimesThread.push_back(wall_time() - t);
-            }
         }
         omp::thread_barrier();
         t = wall_time() - t;
 
         if (report) {
+            //printReport();
             double latency = 1e6 * get_latency(t, 2.0 * loop);
             double msgrate = get_msgrate(t, 2.0 * loop) / 1e6;
             double bw = get_bw(t, msg_size, 2.0 * loop) / 1024 / 1024;
             double completion_time_ms = t * 1e3;
-            double compute_time_ms = get_overhead(compute_time_accs);
-            long long progress_counter_sum = get_progress_total(progress_counters);
-            double idle_time_ms = get_overhead(idle_time_accs);
+//            double compute_time_ms = get_overhead(compute_time_accs);
+//            long long progress_counter_sum = get_progress_total(progress_counters);
+//            double idle_time_ms = get_overhead(idle_time_accs);
 
             char output_str[256];
             int used = 0;

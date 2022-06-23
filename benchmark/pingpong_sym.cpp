@@ -25,19 +25,12 @@ reqs_t *reqs;
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 //const int NUM_PREPOST_RECV = 0;
 
-omp_lock_t writelock;
-
-// time measurement for the loops
-std::vector<std::vector<double>> checkpointTimesAll;
-std::vector<std::vector<double>> checkpointTimesAllSkip;
-std::vector<double> totalExecTimes;
-
 void prepost_recv(int thread_id) {
     ctx_t &ctx = ctxs[thread_id];
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     req_t& req_recv = reqs[thread_id].req_recv;
     for (int i = 0; i < NUM_PREPOST_RECV; i++) {
-        irecv_tag(ctx, buf, 8, addrs[thread_id], 0, &req_recv);
+        irecv(ctx, buf, 8, &req_recv);
     }
 }
 
@@ -54,7 +47,6 @@ void *send_thread(void *arg) {
 
     ctx_t &ctx = ctxs[thread_id];
     // todo: zheli -- the following is a hack to specify the thread as a sending thread
-    ctx.mode = CTX_TX;
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -67,9 +59,9 @@ void *send_thread(void *arg) {
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
+        isend(ctx, buf, msg_size, &req_send);
         while (req_send.type != REQ_TYPE_NULL) progress(send_cq);
-        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
+        irecv(ctx, buf, msg_size, &req_recv);
         while (req_recv.type != REQ_TYPE_NULL) progress(recv_cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
     return nullptr;
@@ -83,8 +75,6 @@ void *recv_thread(void *arg) {
     cq_t &recv_cq = recv_cqs[thread_id];
 
     ctx_t &ctx = ctxs[thread_id];
-    ctx.mode = CTX_RX;
-
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
     char s_data = rank * thread_count + thread_id;
     char r_data = target_rank * thread_count + thread_id;
@@ -96,9 +86,9 @@ void *recv_thread(void *arg) {
     //printf("Setting qp to correct state");
     connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        irecv_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_recv);
+        irecv(ctx, buf, msg_size, &req_recv);
         while (req_recv.type != REQ_TYPE_NULL) progress(recv_cq);
-        isend_tag(ctx, buf, msg_size, addrs[thread_id], thread_id, &req_send);
+        isend(ctx, buf, msg_size, &req_send);
         while (req_send.type != REQ_TYPE_NULL) progress(send_cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -149,7 +139,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < thread_num; ++i) {
         init_cq(device, &send_cqs[i]);
         init_cq(device, &recv_cqs[i]);
-        init_ctx(&device, send_cqs[i], recv_cqs[i], &ctxs[i], CTX_TX | CTX_RX);
+        init_ctx(&device, send_cqs[i], recv_cqs[i], srq_t(), &ctxs[i]);
         put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();

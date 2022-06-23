@@ -31,6 +31,7 @@ struct srq_t {
     char pad[64 - sizeof(ibv_srq*)];
 };
 
+// todo: consider modify placement of the following
 #include "bench_ib_helper.hpp"
 
 struct alignas(64) ctx_t {
@@ -52,7 +53,7 @@ struct req_t {
 struct alignas(64) reqs_t {
     req_t req_send = {REQ_TYPE_NULL};
     req_t req_recv = {REQ_TYPE_NULL};
-}
+};
 
 struct alignas(64) time_acc_t {
     double tot_time_us = 0;
@@ -158,9 +159,9 @@ static inline int init_srq(device_t device, srq_t *srq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, ctx_t *ctx, srq_t srq) {
+static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx) {
     // Create and initialize queue pair
-    ctx->qp = qp_create(device, send_cq, rx_cq, srq);
+    ctx->qp = qp_create(device, send_cq, recv_cq, srq);
     ctx->device = device;
     qp_init(ctx->qp, (int) device->dev_port);
 
@@ -235,13 +236,15 @@ static inline bool progress(cq_t cq) {
             exit(EXIT_FAILURE);
         }
         // got completed entry from cq. set result type
-        auto* req = (req_t*) wc.wr_id[i];
+        auto* req = (req_t*) wc[i].wr_id;
         req->type = REQ_TYPE_NULL;
     }
     return numCompleted;
 }
 
-static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
+static inline void isend(ctx_t ctx, void *src, size_t size, req_t *req) {
+    // todo: is req useful? consolidate the two way of doing things(notification of completion)
+    // in symmetric and progress setup
     req->type = REQ_TYPE_PEND;
     int send_flags = IBV_SEND_SIGNALED;
     if (size < PERFTEST_MAX_INLINE_SIZE) {
@@ -265,7 +268,7 @@ static inline void isend_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *
 }
 
 // used in symmetric setup, but not the progress thread one
-static inline void irecv_tag(ctx_t ctx, void *src, size_t size, int tag, req_t *req) {
+static inline void irecv(ctx_t ctx, void *src, size_t size, req_t *req) {
     req->type = REQ_TYPE_PEND;
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
