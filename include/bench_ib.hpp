@@ -213,7 +213,8 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
 }
 
 static inline bool progress(cq_t cq) {
-    const int numToPoll = 1;
+    // todo: make numToPoll configurable
+    const int numToPoll = 16;
     struct ibv_wc wc[numToPoll];
     int numCompleted;
     numCompleted = ibv_poll_cq(cq.cq, numToPoll, wc);
@@ -223,11 +224,6 @@ static inline bool progress(cq_t cq) {
         exit(EXIT_FAILURE);
     }
 
-    // No completion event
-    if (numCompleted == 0) {
-        return 0;
-    }
-
     for (int i = 0; i < numCompleted; i++) {
         if (wc[i].status != ibv_wc_status::IBV_WC_SUCCESS) {
             printf("Error: Failed status %s (%d)\n",
@@ -235,9 +231,10 @@ static inline bool progress(cq_t cq) {
                    wc[i].status);
             exit(EXIT_FAILURE);
         }
-        // got completed entry from cq. set result type
-        auto* req = (req_t*) wc[i].wr_id;
-        req->type = REQ_TYPE_NULL;
+        // todo: the following is used in the symetric case and may be removed
+        //  got completed entry from cq. set result type
+//        auto* req = (req_t*) wc[i].wr_id;
+//        req->type = REQ_TYPE_NULL;
     }
     return numCompleted;
 }

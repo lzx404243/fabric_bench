@@ -14,11 +14,11 @@
 #include <numeric> // std::adjacent_difference
 #include <algorithm>
 
-int rx_thread_num;
+int rx_thread_num = 1;
 //extern std::atomic<int> thread_started;
 //extern fb::time_acc_t * compute_time_accs;
 //extern fb::time_acc_t * idle_time_accs;
-//extern fb::sync_t *syncs;
+extern fb::sync_t *syncs;
 //extern int prefilled_work;
 //extern fb::counter_t* progress_counters;
 
@@ -139,12 +139,17 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         }
         // prepost receives
         prepost_recv(omp::thread_id());
-        omp::thread_barrier();
+        omp::proc_barrier();
         // warm up loop
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-        omp::thread_barrier();
+        printf("thread %d done warm up\n", omp::thread_id());
+        // todo: add code to reset sync
+        omp::proc_barrier();
+        // reset syncs
+        syncs[omp::thread_id()].sync = 8;
+        omp::proc_barrier();
         t = wall_time();
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);

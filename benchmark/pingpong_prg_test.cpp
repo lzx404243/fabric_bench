@@ -31,12 +31,10 @@ srq_t * srqs;
 sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
-int rx_thread_num = 1;
 time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
 counter_t *worker_idxes;
-
 
 
 std::vector<int> prg_thread_bindings;
@@ -45,6 +43,13 @@ int compute_time_in_us = 0;
 int prefilled_work = 0;
 int num_worker_per_qp = 1;
 int num_qp = thread_num;
+
+// in the progress thread setup, the worker thread is not receiving messages
+// so the following function is left empty
+// todo: may refractor to a preSKIP_hook()
+void prepost_recv(int thread_id) {
+
+}
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -65,8 +70,8 @@ void *send_thread(void *arg) {
 //            ((size / 2) * thread_count));
     int count = 0;
     RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        progress_new(cq, nullptr);
+        isend(ctx, s_buf, msg_size, &req);
+        progress(cq);
 
         // progress for send completion. Note that we don't block  for the completion of the send here
         while (syncs[thread_id].sync == 0) {
@@ -76,7 +81,7 @@ void *send_thread(void *arg) {
                 idled = true;
                 clock_gettime(CLOCK_REALTIME, &start);
             }
-            progress_new(cq, nullptr);
+            progress(cq);
         }
         if (idled) {
             // stop timer
@@ -131,7 +136,7 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
                 clock_gettime(CLOCK_REALTIME, &start);
             }
             // progress for send completion. Note that we don't block for the completion of the send here
-            progress_new(cq, nullptr);
+            progress(cq);
         }
         if (idled) {
             // stop timer
@@ -147,8 +152,8 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             sleep_for_us(compute_time_in_us, time_acc);
             //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
-        isend_tag(ctx, s_buf, msg_size, thread_id, &req);
-        progress_new(cq, nullptr);
+        isend(ctx, s_buf, msg_size, &req);
+        progress(cq);
 
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -168,10 +173,19 @@ void incrementWorkerIdx(int progress_thread_id, long long& workerIdx) {
     }
 }
 
-void progress_loop(int id, int numReceivePerWorker) {
-    // real iteration
-//    // Each worker thread is receiving a fixed number of messages
-//    std::vector<int> thread_recv_count(thread_num);
+void progress_thread(int id) {
+    bool bind_prg_thread = true;
+    if (bind_prg_thread) {
+        // bind progress thread to core using the input binding specification if available
+        auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
+        if (err) {
+            errno = err;
+            printf("setting progress thread affinity failed: error %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    }
+    int cpu_num = sched_getcpu();
+    fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
     long long& progress_counter = progress_counters[id].count;
     long long& worker_idx = worker_idxes[id].count;
     // first worker id
@@ -182,8 +196,6 @@ void progress_loop(int id, int numReceivePerWorker) {
     char *buf = (char*) device.heap_ptr + (2 * id + 1) * max_size;
     const int PREPOST_RECV_NUM = 2048;
     irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], PREPOST_RECV_NUM);
-    // list of worker ids that's polled from the completion queue as requests are completed
-    int* completed_worker_num_from_cq = (int *) calloc(thread_num, sizeof(int));
     int numWorkersCompleted;
     // Mark the thread as started
     thread_started++;
@@ -191,7 +203,7 @@ void progress_loop(int id, int numReceivePerWorker) {
         // Progress the receives
         numWorkersCompleted = 0;
         while (!thread_stop.load()) {
-            numWorkersCompleted = progress_new(rx_cqs[id], completed_worker_num_from_cq);
+            numWorkersCompleted = progress(rx_cqs[id]);
             if (numWorkersCompleted > 0) {
                 break;
             }
@@ -207,28 +219,6 @@ void progress_loop(int id, int numReceivePerWorker) {
         buf = (char *) device.heap_ptr + (2 * worker_idx + 1) * max_size;
         irecv_tag_srq(device, buf, max_size, worker_idx, &srqs[id], numWorkersCompleted);
     }
-
-
-}
-
-
-void progress_thread(int id) {
-    bool bind_prg_thread = true;
-    if (bind_prg_thread) {
-        // bind progress thread to core using the input binding specification if available
-        auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
-        if (err) {
-            errno = err;
-            printf("setting progress thread affinity failed: error %s\n", strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-    }
-    int cpu_num = sched_getcpu();
-    fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
-    int numReceivePerWorker = 1;
-    progress_loop(id, numReceivePerWorker);
-    numReceivePerWorker = 8;
-    progress_loop(id, numReceivePerWorker);
 }
 
 int main(int argc, char *argv[]) {
@@ -325,7 +315,7 @@ int main(int argc, char *argv[]) {
                 //std::cout << "worker " << workerThreadIdx << "is creating resources " << std::endl ;
 
                 init_cq(device, &cqs[workerThreadIdx]);
-                init_ctx(&device, cqs[workerThreadIdx], rx_cqs[workerThreadIdx % rx_thread_num], &ctxs[workerThreadIdx], srqs[workerThreadIdx % rx_thread_num]);
+                init_ctx(&device, cqs[workerThreadIdx], rx_cqs[workerThreadIdx % rx_thread_num], srqs[workerThreadIdx % rx_thread_num], &ctxs[workerThreadIdx]);
             }
             put_ctx_addr(ctxs[workerThreadIdx], workerThreadIdx);
         }
