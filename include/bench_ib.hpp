@@ -152,7 +152,7 @@ static inline int init_srq(device_t device, srq_t *srq) {
     srq_attr.attr.max_sge = 1;
     srq_attr.attr.srq_limit = 0;
     srq->srq = ibv_create_srq(device.dev_pd, &srq_attr);
-    if (srq->srq == 0) {
+    if (!srq->srq) {
         fprintf(stderr, "Could not create shared received queue\n");
         exit(EXIT_FAILURE);
     }
@@ -212,8 +212,7 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
      qp_to_rts(ctx.qp);
 }
 
-static inline bool progress(cq_t cq) {
-    // todo: make numToPoll configurable
+static inline int progress(cq_t cq) {
     const int numToPoll = 16;
     struct ibv_wc wc[numToPoll];
     int numCompleted;
@@ -240,9 +239,7 @@ static inline bool progress(cq_t cq) {
 }
 
 static inline void isend(ctx_t ctx, void *src, size_t size, req_t *req) {
-    // todo: is req useful? consolidate the two way of doing things(notification of completion)
-    // in symmetric and progress setup
-    req->type = REQ_TYPE_PEND;
+
     int send_flags = IBV_SEND_SIGNALED;
     if (size < PERFTEST_MAX_INLINE_SIZE) {
         send_flags |= IBV_SEND_INLINE;
@@ -282,6 +279,11 @@ static inline void irecv(ctx_t ctx, void *src, size_t size, req_t *req) {
 }
 
 static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, srq_t *srq, int count) {
+
+    if (count == 0) {
+        return;
+    }
+
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,

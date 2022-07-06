@@ -18,8 +18,8 @@ int rx_thread_num = 1;
 //extern std::atomic<int> thread_started;
 //extern fb::time_acc_t * compute_time_accs;
 //extern fb::time_acc_t * idle_time_accs;
-extern fb::sync_t *syncs;
-//extern int prefilled_work;
+fb::sync_t *syncs;
+int prefilled_work = 0;
 //extern fb::counter_t* progress_counters;
 
 
@@ -29,6 +29,7 @@ std::vector<double> totalExecTimes;
 omp_lock_t writelock;
 
 void prepost_recv(int thread_id);
+void reset_counters();
 
 namespace fb {
 
@@ -144,16 +145,21 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-        printf("thread %d done warm up\n", omp::thread_id());
         // todo: add code to reset sync
         omp::proc_barrier();
-        // reset syncs
-        syncs[omp::thread_id()].sync = 8;
+        if (omp::thread_id() == 0) {
+            // one thread is resetting syncs, counters etc for all workers
+            reset_counters();
+        }
         omp::proc_barrier();
         t = wall_time();
+        //int counter = 0;
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
+            //printf("thread %d -- rank %d finishes iter %d\n", omp::thread_id(), pmi_get_rank(), counter++);
         }
+        //printf("thread %d -- rank %d done with all\n", omp::thread_id(), pmi_get_rank());
+
         omp::thread_barrier();
         t = wall_time() - t;
 
@@ -170,7 +176,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             char output_str[256];
             int used = 0;
             used += snprintf(output_str + used, 256, "%-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f",
-                             omp::thread_count(), latency, msgrate, bw, completion_time_ms, 0, 0, 0);
+                             omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, 0, 0, 0);
             printf("%s\n", output_str);
             fflush(stdout);
         }

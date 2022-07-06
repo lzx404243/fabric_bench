@@ -27,21 +27,17 @@ ctx_t *ctxs;
 addr_t *addrs;
 srq_t * srqs;
 
-
-sync_t *syncs;
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
 time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
-counter_t *worker_idxes;
+counter_t *next_worker_idxes;
 
 
 std::vector<int> prg_thread_bindings;
 
 int compute_time_in_us = 0;
-int prefilled_work = 0;
-int num_worker_per_qp = 1;
 int num_qp = thread_num;
 
 // in the progress thread setup, the worker thread is not receiving messages
@@ -49,6 +45,17 @@ int num_qp = thread_num;
 // todo: may refractor to a preSKIP_hook()
 void prepost_recv(int thread_id) {
 
+}
+
+void reset_counters() {
+    for (int i = 0; i < thread_num; i++) {
+        // reset syncs
+        syncs[i].sync = prefilled_work;
+    }
+    for (int i = 0; i < rx_thread_num; i++) {
+        // for all progress thread, reset next worker index to the first worker it handles
+        next_worker_idxes[i].count = i;
+    }
 }
 
 void *send_thread(void *arg) {
@@ -154,7 +161,6 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
         }
         isend(ctx, s_buf, msg_size, &req);
         progress(cq);
-
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     // check whether the thread has migrated
@@ -187,37 +193,39 @@ void progress_thread(int id) {
     int cpu_num = sched_getcpu();
     fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
     long long& progress_counter = progress_counters[id].count;
-    long long& worker_idx = worker_idxes[id].count;
+    long long&next_worker_idx = next_worker_idxes[id].count;
     // first worker id
-    worker_idx = id;
+    next_worker_idx = id;
     progress_counter = 0;
     const int ANY_ID = 0;
     // Prepost some receive requests first -- filling the receive queue
     char *buf = (char*) device.heap_ptr + (2 * id + 1) * max_size;
     const int PREPOST_RECV_NUM = 2048;
     irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], PREPOST_RECV_NUM);
-    int numWorkersCompleted;
+    int numRecvCompleted;
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
         // Progress the receives
-        numWorkersCompleted = 0;
-        while (!thread_stop.load()) {
-            numWorkersCompleted = progress(rx_cqs[id]);
-            if (numWorkersCompleted > 0) {
-                break;
-            }
+        numRecvCompleted = 0;
+        while (!thread_stop.load() && numRecvCompleted == 0) {
+            numRecvCompleted = progress(rx_cqs[id]);
             progress_counter++;
         }
-        // Receive some messages
-        for (int k = 0; k < numWorkersCompleted; k++) {
+        if (thread_stop.load()) {
+            // exit progress thread
+            break;
+        }
+        // Received some messages
+        for (int k = 0; k < numRecvCompleted; k++) {
             // assign work to workers in a round-robin manner
-            ++syncs[worker_idx].sync;
-            incrementWorkerIdx(id, worker_idx);
+            int oldWorkIdx = next_worker_idx;
+            incrementWorkerIdx(id, next_worker_idx);
+            ++syncs[oldWorkIdx].sync;
         }
         // refill the receive queue with receive requests
-        buf = (char *) device.heap_ptr + (2 * worker_idx + 1) * max_size;
-        irecv_tag_srq(device, buf, max_size, worker_idx, &srqs[id], numWorkersCompleted);
+        buf = (char *) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
+        irecv_tag_srq(device, buf, max_size, next_worker_idx, &srqs[id], numRecvCompleted);
     }
 }
 
@@ -256,18 +264,11 @@ int main(int argc, char *argv[]) {
     if (argc > 7) {
         prefilled_work = atoi(argv[7]);
     }
-    if (argc > 8) {
-        num_worker_per_qp = atoi(argv[8]);
-        if (num_worker_per_qp > floor(thread_num / rx_thread_num)) {
-            printf("Number of worker sharing one queue pair is too large. max is: %d\n", floor(thread_num / rx_thread_num));
-            exit(EXIT_FAILURE);
-        }
-    }
     // check worker thread distribution
-//    if (thread_num % rx_thread_num != 0) {
-//        printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
-//        exit(EXIT_FAILURE);
-//    }
+    if (thread_num % rx_thread_num != 0) {
+        printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
+        exit(EXIT_FAILURE);
+    }
     if (thread_num * 2 * max_size > HEAP_SIZE) {
         printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
         exit(1);
@@ -295,7 +296,7 @@ int main(int argc, char *argv[]) {
     // counters for progress for each progress thread
     progress_counters = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
     // the index of next available workers for each progress thread
-    worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
+    next_worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
     // Accumulators for idle time for each thread
     idle_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
     // Set up receive completion queue, one per progress thread
@@ -306,19 +307,10 @@ int main(int argc, char *argv[]) {
         init_srq(device, &srqs[i]);
     }
     // set up queue pairs and context
-    for (int i = 0; i < rx_thread_num; ++i) {
-        int groupCntIdx = 0;
-        for (int workerThreadIdx = i; workerThreadIdx < thread_num; workerThreadIdx +=rx_thread_num) {
-            // workers handled by the same progress thread
-            if (groupCntIdx++ % num_worker_per_qp == 0) {
-                // only one in a group creates the queue pair
-                //std::cout << "worker " << workerThreadIdx << "is creating resources " << std::endl ;
-
-                init_cq(device, &cqs[workerThreadIdx]);
-                init_ctx(&device, cqs[workerThreadIdx], rx_cqs[workerThreadIdx % rx_thread_num], srqs[workerThreadIdx % rx_thread_num], &ctxs[workerThreadIdx]);
-            }
-            put_ctx_addr(ctxs[workerThreadIdx], workerThreadIdx);
-        }
+    for (int i = 0; i < thread_num; ++i) {
+        init_cq(device, &cqs[i]);
+        init_ctx(&device, cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &ctxs[i]);
+        put_ctx_addr(ctxs[i], i);
     }
     flush_ctx_addr();
     for (int i = 0; i < thread_num; ++i) {
@@ -358,15 +350,9 @@ int main(int argc, char *argv[]) {
     }
 
     // clean up resources
-    for (int i = 0; i < rx_thread_num; ++i) {
-        int groupCntIdx = 0;
-        for (int workerThreadIdx = i; workerThreadIdx < thread_num; workerThreadIdx +=rx_thread_num) {
-            // workers handled by the same progress thread
-            if (groupCntIdx++ % num_worker_per_qp == 0) {
-                free_ctx(&ctxs[workerThreadIdx]);
-                free_cq(&cqs[workerThreadIdx]);
-            }
-        }
+    for (int i = 0; i < thread_num; ++i) {
+        free_ctx(&ctxs[i]);
+        free_cq(&cqs[i]);
     }
 
     free_device(&device);
