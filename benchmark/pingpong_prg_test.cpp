@@ -219,9 +219,9 @@ void progress_thread(int id) {
         // Received some messages
         for (int k = 0; k < numRecvCompleted; k++) {
             // assign work to workers in a round-robin manner
-            int oldWorkIdx = next_worker_idx;
+            int worker_idx = next_worker_idx;
             incrementWorkerIdx(id, next_worker_idx);
-            ++syncs[oldWorkIdx].sync;
+            ++syncs[worker_idx].sync;
         }
         // refill the receive queue with receive requests
         buf = (char *) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
