@@ -14,12 +14,10 @@
 #include <numeric> // std::adjacent_difference
 #include <algorithm>
 
+int tx_thread_num = 3;
 int rx_thread_num = 1;
-//extern std::atomic<int> thread_started;
 //extern fb::time_acc_t * compute_time_accs;
 //extern fb::time_acc_t * idle_time_accs;
-fb::sync_t *syncs;
-int prefilled_work = 0;
 //extern fb::counter_t* progress_counters;
 
 
@@ -32,6 +30,19 @@ void prepost_recv(int thread_id);
 void reset_counters();
 
 namespace fb {
+
+struct alignas(64) time_acc_t {
+    double tot_time_us = 0;
+};
+
+struct alignas(64) counter_t {
+    long long count = 0;
+};
+
+struct sync_t {
+    alignas(64) std::atomic<int> sync;
+    char pad[64 - sizeof(std::atomic<int>)];
+};
 
 static inline void comm_init() {
     MLOG_Init();

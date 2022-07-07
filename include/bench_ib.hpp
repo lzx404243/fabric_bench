@@ -55,19 +55,6 @@ struct alignas(64) reqs_t {
     req_t req_recv = {REQ_TYPE_NULL};
 };
 
-struct alignas(64) time_acc_t {
-    double tot_time_us = 0;
-};
-
-struct alignas(64) counter_t {
-    long long count = 0;
-};
-
-struct sync_t {
-    alignas(64) std::atomic<int> sync;
-    char pad[64 - sizeof(std::atomic<int>)];
-};
-
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
     // Get the list of devices

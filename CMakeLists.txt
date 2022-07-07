@@ -13,17 +13,17 @@ check_c_source_compiles(
     HAVE_RESTRICT
 )
 
-set(FB_SERVER ibv CACHE STRING "Server: ofi MPI ibv")
+set(FB_SERVER OFI CACHE STRING "Server: OFI MPI IBV")
 
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 
 find_package(OpenMP REQUIRED)
-if("ofi" IN_LIST FB_SERVER)
+if("OFI" IN_LIST FB_SERVER)
     find_package(Fabric REQUIRED)
     set(FB_USE_OFI ON)
 endif()
 
-if("ibv" IN_LIST FB_SERVER)
+if("IBV" IN_LIST FB_SERVER)
     find_package(Fabric REQUIRED)
     set(FB_USE_IBV ON)
 endif()
@@ -39,7 +39,7 @@ target_include_directories(fb_lib INTERFACE
 target_link_libraries(fb_lib INTERFACE
         mlog-obj
         pmi-obj
-        Fabric::IBV
+        Fabric::${FB_SERVER}
         OpenMP::OpenMP_CXX
 )
 
