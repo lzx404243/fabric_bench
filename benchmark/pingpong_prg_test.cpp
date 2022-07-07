@@ -1,9 +1,7 @@
 #include "bench_fabric.hpp"
 #include "comm_exp.hpp"
 #include "thread_utils.hpp"
-#include "bench_ib.hpp"
 #include <vector>
-#include <unordered_map>
 #include <thread>
 #include <boost/tokenizer.hpp>
 #include <chrono>
