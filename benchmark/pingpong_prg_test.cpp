@@ -5,24 +5,23 @@
 #include <thread>
 #include <boost/tokenizer.hpp>
 #include <chrono>
-#include <math.h>
-
-using namespace boost;
-#define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
-
 #include <sched.h>
-using namespace fb;
 
-int thread_num = 4;
+using namespace fb;
+using namespace boost;
+
+int tx_thread_num = 4;
 int min_size = 8;
 int max_size = 1024;
-bool touch_data = false;
+const bool bind_prg_thread = true;
 int rank, size, target_rank;
 device_t device;
-cq_t *cqs;
+cq_t *tx_cqs;
 cq_t *rx_cqs;
-ctx_t *ctxs;
+ctx_t *tx_ctxs;
+ctx_t *rx_ctxs;
 addr_t *addrs;
+sync_t *syncs;
 srq_t * srqs;
 
 std::atomic<bool> thread_stop = {false};
@@ -34,9 +33,8 @@ counter_t *next_worker_idxes;
 
 
 std::vector<int> prg_thread_bindings;
-
 int compute_time_in_us = 0;
-int num_qp = thread_num;
+int prefilled_work = 0;
 
 // in the progress thread setup, the worker thread is not receiving messages
 // so the following function is left empty
@@ -46,7 +44,7 @@ void prepost_recv(int thread_id) {
 }
 
 void reset_counters() {
-    for (int i = 0; i < thread_num; i++) {
+    for (int i = 0; i < tx_thread_num; i++) {
         // reset syncs
         syncs[i].sync = prefilled_work;
     }
@@ -56,28 +54,38 @@ void reset_counters() {
     }
 }
 
-void *send_thread(void *arg) {
-    //printf("I am a send thread\n");
+static inline int init_ctx_common(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode)
+{
+#ifdef FB_USE_IBV
+    return init_ctx(device, send_cq, recv_cq, srq, ctx, mode);
+#endif
+#ifdef FB_USE_OFI
+    return init_ctx(device, recv_cq, ctx, mode);
+#endif
+}
+
+void* send_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
     int cpu_num = sched_getcpu();
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
-    ctx_t &ctx = ctxs[thread_id];
-    char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
-    auto& cq = cqs[thread_id];
+#ifdef FB_USE_OFI
+    addr_t& addr = addrs[thread_id % rx_thread_num];
+#else
+    addr_t addr = addr_t();
+#endif
+
+    ctx_t& tx_ctx = tx_ctxs[thread_id];
+    char *s_buf = (char*) device.heap_ptr + thread_id * 2 * max_size;
+    auto& cq = tx_cqs[thread_id];
     req_t req = {REQ_TYPE_NULL};
     time_acc_t &time_acc = compute_time_accs[thread_id];
     time_acc_t &idle_time_acc = idle_time_accs[thread_id];
     bool idled = false;
     struct timespec start, stop;
-//     printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
-//            (rank % (size / 2) * thread_count + thread_id),
-//            ((size / 2) * thread_count));
-    int count = 0;
-    RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        isend(ctx, s_buf, msg_size, &req);
+    RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+        isend(tx_ctx, s_buf, msg_size, addr, &req);
         progress(cq);
-
         // progress for send completion. Note that we don't block  for the completion of the send here
         while (syncs[thread_id].sync == 0) {
             // idle
@@ -92,16 +100,15 @@ void *send_thread(void *arg) {
             // stop timer
             clock_gettime(CLOCK_REALTIME, &stop);
             idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
-                    + ( stop.tv_sec - start.tv_sec ) * 1e6;
+                                         + ( stop.tv_sec - start.tv_sec ) * 1e6;
             idled = false;
         }
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
-        }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();
@@ -113,26 +120,26 @@ void *send_thread(void *arg) {
     return nullptr;
 }
 
-void *recv_thread(void *arg) {
+void* recv_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
-    ctx_t &ctx = ctxs[thread_id];
-    char *s_buf = (char *) device.heap_ptr + thread_id * 2 * max_size;
+    ctx_t& tx_ctx = tx_ctxs[thread_id];
+    char *s_buf = (char*) device.heap_ptr + thread_id * 2 * max_size;
     req_t req = {REQ_TYPE_NULL};
+#ifdef FB_USE_OFI
+    addr_t& addr = addrs[thread_id % rx_thread_num];
+#else
+    addr_t addr = addr_t();
+#endif
     int cpu_num = sched_getcpu();
-    auto& cq = cqs[thread_id];
+    auto& cq = tx_cqs[thread_id];
     time_acc_t &time_acc = compute_time_accs[thread_id];
     time_acc_t &idle_time_acc = idle_time_accs[thread_id];
     bool idled = false;
     struct timespec start, stop;
 
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
-
-//     printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
-//            (rank % (size / 2) * thread_count + thread_id),
-//            ((size / 2) * thread_count));
-
-RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
+RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         while (syncs[thread_id].sync == 0) {
             // idle
             if (!idled) {
@@ -147,19 +154,17 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
             // stop timer
             clock_gettime(CLOCK_REALTIME, &stop);
             idle_time_acc.tot_time_us += ( stop.tv_nsec - start.tv_nsec ) / 1e3
-                    + ( stop.tv_sec - start.tv_sec ) * 1e6;
+                                         + ( stop.tv_sec - start.tv_sec ) * 1e6;
             idled = false;
         }
-
         --syncs[thread_id].sync;
         // compute
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
-        isend(ctx, s_buf, msg_size, &req);
+        isend(tx_ctx, s_buf, msg_size, addr, &req);
         progress(cq);
-        }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();
@@ -172,13 +177,12 @@ RUN_VARY_MSG({min_size, min_size}, (rank == 0 && thread_id == 0), [&](int msg_si
 
 void incrementWorkerIdx(int progress_thread_id, long long& workerIdx) {
     workerIdx += rx_thread_num;
-    if (workerIdx >= thread_num) {
+    if (workerIdx >= tx_thread_num) {
         workerIdx = progress_thread_id;
     }
 }
 
 void progress_thread(int id) {
-    bool bind_prg_thread = true;
     if (bind_prg_thread) {
         // bind progress thread to core using the input binding specification if available
         auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
@@ -188,8 +192,11 @@ void progress_thread(int id) {
             exit(EXIT_FAILURE);
         }
     }
+    ctx_t& rx_ctx = rx_ctxs[id];
     int cpu_num = sched_getcpu();
     fprintf(stderr, "wall clock progress Thread is running on CPU %3d\n",  cpu_num);
+    // todo: remove the reqs. not needed
+    req_t *reqs = (req_t*) calloc(tx_thread_num, sizeof(req_t));
     long long& progress_counter = progress_counters[id].count;
     long long&next_worker_idx = next_worker_idxes[id].count;
     // first worker id
@@ -199,7 +206,7 @@ void progress_thread(int id) {
     // Prepost some receive requests first -- filling the receive queue
     char *buf = (char*) device.heap_ptr + (2 * id + 1) * max_size;
     const int PREPOST_RECV_NUM = 2048;
-    irecv_tag_srq(device, buf, max_size, ANY_ID, &srqs[id], PREPOST_RECV_NUM);
+    irecv(rx_ctx, buf, max_size, ADDR_ANY, &reqs[0], PREPOST_RECV_NUM);
     int numRecvCompleted;
     // Mark the thread as started
     thread_started++;
@@ -229,7 +236,7 @@ void progress_thread(int id) {
 
 int main(int argc, char *argv[]) {
     if (argc > 1)
-        thread_num = atoi(argv[1]);
+        tx_thread_num = atoi(argv[1]);
     if (argc > 2)
         rx_thread_num = atoi(argv[2]);
     if (argc > 3)
@@ -263,72 +270,74 @@ int main(int argc, char *argv[]) {
         prefilled_work = atoi(argv[7]);
     }
     // check worker thread distribution
-    if (thread_num % rx_thread_num != 0) {
+    if (tx_thread_num % rx_thread_num != 0) {
         printf("number of worker needs to be divisible by number of progress thread. If this is not true, need to change the core binding before running");
         exit(EXIT_FAILURE);
     }
-    if (thread_num * 2 * max_size > HEAP_SIZE) {
-        printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, thread_num * 2 * max_size);
+    if (tx_thread_num * 2 * max_size > HEAP_SIZE) {
+        printf("HEAP_SIZE is too small! (%d < %d required)\n", HEAP_SIZE, tx_thread_num * 2 * max_size);
         exit(1);
     }
-    fprintf(stderr, "version: poll when worker idle\n");
-
     comm_init();
-    init_device(&device, thread_num != 1);
-
+    init_device(&device, tx_thread_num != 1);
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
     // Send completion queues (per worker)
-    //num_qp = ceil((double)thread_num / num_worker_per_qp);
-    cqs = (cq_t *) calloc(thread_num, sizeof(cq_t));
+    tx_cqs = (cq_t*) calloc(tx_thread_num, sizeof(cq_t));
+    rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
     // Send context (per worker)
-    ctxs = (ctx_t *) calloc(thread_num, sizeof(ctx_t));
-    addrs = (addr_t *) calloc(thread_num, sizeof(addr_t));
+    tx_ctxs = (ctx_t*) calloc(tx_thread_num, sizeof(ctx_t));
+    rx_ctxs = (ctx_t*) calloc(rx_thread_num, sizeof(ctx_t));
+    srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
+#ifdef FB_USE_IBV
+    const int num_ctx_addr = tx_thread_num;
+    // Shared receive queues queues(per progress thread)
+    ctx_t* exchanged_ctx = tx_ctxs;
+#elifdef FB_USE_OFI
+    const int num_ctx_addr = rx_thread_num;
+    ctx_t* exchanged_ctx = rx_ctxs;
+#endif
     // Receive completion queues(per progress thread)
     rx_cqs = (cq_t*) calloc(rx_thread_num, sizeof(cq_t));
-    // Shared receive queues queues(per progress thread)
-    srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
+    addrs = (addr_t*) calloc(num_ctx_addr, sizeof(addr_t));
     // Accumulators for compute time for each thread
-    compute_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
+    compute_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
     // counters for progress for each progress thread
     progress_counters = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
+    // Accumulators for idle time for each thread
+    idle_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
     // the index of next available workers for each progress thread
     next_worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
-    // Accumulators for idle time for each thread
-    idle_time_accs = (time_acc_t *) calloc(thread_num, sizeof(time_acc_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_cq(device, &rx_cqs[i]);
-    }
-    for (int i = 0; i < rx_thread_num; ++i) {
+        init_ctx_common(&device, rx_cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &rx_ctxs[i], CTX_RX);
+#ifdef FB_USE_IBV
         init_srq(device, &srqs[i]);
+#endif
     }
-    // set up queue pairs and context
-    for (int i = 0; i < thread_num; ++i) {
-        init_cq(device, &cqs[i]);
-        init_ctx(&device, cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &ctxs[i]);
-        put_ctx_addr(ctxs[i], i);
+    // set up send context
+    for (int i = 0; i < tx_thread_num; ++i) {
+        init_cq(device, &tx_cqs[i]);
+        init_ctx_common(&device, tx_cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &tx_ctxs[i], CTX_TX);
+    }
+    for (int i = 0; i < num_ctx_addr; ++i) {
+        put_ctx_addr(exchanged_ctx[i], i);
     }
     flush_ctx_addr();
-    for (int i = 0; i < thread_num; ++i) {
+    for (int i = 0; i < num_ctx_addr; ++i) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
     }
+#ifdef FB_USE_IBV
     // Put the queue pairs to the correct states
-    for (int i = 0; i < thread_num; i++) {
-        if (ctxs[i].qp) {
-            connect_ctx(ctxs[i], addrs[i]);
-        } else {
-            // copy shared queue pair and associated cqs from worker in the same group
-            //std::cout << "worker " << i << "is coping from " << (i - rx_thread_num) << std::endl ;
-            ctxs[i] = ctxs[i - rx_thread_num];
-            cqs[i] = cqs[i - rx_thread_num];
-        }
+    for (int i = 0; i < tx_thread_num; i++) {
+        connect_ctx(tx_ctxs[i], addrs[i]);
     }
-
+#endif
     // atomic flag(per worker) used by the progress thread to signal that the worker can read from the receive buf
-    syncs = (sync_t*) calloc(thread_num, sizeof(sync_t));
-    for (int i = 0; i < thread_num; ++i) {
+    syncs = (sync_t*) calloc(tx_thread_num, sizeof(sync_t));
+    for (int i = 0; i < tx_thread_num; ++i) {
         syncs[i].sync = 0;
     }
     std::vector<std::thread> threads(rx_thread_num);
@@ -336,11 +345,10 @@ int main(int argc, char *argv[]) {
         threads[id] = std::thread(progress_thread, id);
     }
     while (thread_started.load() != rx_thread_num) continue;
-    //printf("all progress thread ready, starting worker\n");
     if (rank < size / 2) {
-        omp::thread_run(send_thread, thread_num);
+        omp::thread_run(send_thread, tx_thread_num);
     } else {
-        omp::thread_run(recv_thread, thread_num);
+        omp::thread_run(recv_thread, tx_thread_num);
     }
     thread_stop = true;
     for (int id = 0; id < rx_thread_num; id++) {
@@ -348,15 +356,15 @@ int main(int argc, char *argv[]) {
     }
 
     // clean up resources
-    for (int i = 0; i < thread_num; ++i) {
-        free_ctx(&ctxs[i]);
-        free_cq(&cqs[i]);
+    for (int i = 0; i < tx_thread_num; ++i) {
+        free_ctx(&tx_ctxs[i]);
+        free_cq(&tx_cqs[i]);
     }
 
     free_device(&device);
     free(addrs);
-    free(ctxs);
-    free(cqs);
+    free(tx_ctxs);
+    free(tx_cqs);
     free(rx_cqs);
     comm_free();
     return 0;

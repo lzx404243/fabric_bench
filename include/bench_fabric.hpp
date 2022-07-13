@@ -34,6 +34,8 @@ struct device_t;
  * A completion queue is created on a device and can be associated with one or more context
  */
 struct cq_t;
+// todo: add documentation
+struct srq_t;
 /**
  * A context, the unit of thread parallelism for communication
  *

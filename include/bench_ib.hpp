@@ -38,7 +38,7 @@ struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
-    int pending;
+    srq_t *srq = nullptr;
 };
 
 struct alignas(64) addr_t {
@@ -146,16 +146,22 @@ static inline int init_srq(device_t device, srq_t *srq) {
     return FB_OK;
 }
 
-static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx) {
-    // Create and initialize queue pair
-    ctx->qp = qp_create(device, send_cq, recv_cq, srq);
+static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode) {
+    // todo: if CTX_RX mode, create ctx without queue pair, but need the device, and srq
     ctx->device = device;
-    qp_init(ctx->qp, (int) device->dev_port);
+    if (mode == CTX_TX) {
+        // Create and initialize queue pair
+        ctx->qp = qp_create(device, send_cq, recv_cq, srq);
+        qp_init(ctx->qp, (int) device->dev_port);
+        // Save local conn info in ctx
+        struct conn_info *local_conn_info = &ctx->local_conn_info;
+        local_conn_info->qp_num = ctx->qp->qp_num;
+        local_conn_info->lid = device->port_attr.lid;
+    } else {
+        // recv context
+        ctx->srq = srq;
+    }
 
-    // Save local conn info in ctx
-    struct conn_info *local_conn_info = &ctx->local_conn_info;
-    local_conn_info->qp_num = ctx->qp->qp_num;
-    local_conn_info->lid = device->port_attr.lid;
     return FB_OK;
 }
 
@@ -225,7 +231,7 @@ static inline int progress(cq_t cq) {
     return numCompleted;
 }
 
-static inline void isend(ctx_t ctx, void *src, size_t size, req_t *req) {
+static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t *req) {
 
     int send_flags = IBV_SEND_SIGNALED;
     if (size < PERFTEST_MAX_INLINE_SIZE) {
@@ -249,7 +255,7 @@ static inline void isend(ctx_t ctx, void *src, size_t size, req_t *req) {
 }
 
 // used in symmetric setup, but not the progress thread one
-static inline void irecv(ctx_t ctx, void *src, size_t size, req_t *req) {
+static inline void irecv_non_srq(ctx_t ctx, void *src, size_t size, req_t *req) {
     req->type = REQ_TYPE_PEND;
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
@@ -265,7 +271,7 @@ static inline void irecv(ctx_t ctx, void *src, size_t size, req_t *req) {
     return;
 }
 
-static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int tag, srq_t *srq, int count) {
+static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, req_t *req, int count) {
 
     if (count == 0) {
         return;
@@ -274,14 +280,14 @@ static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int t
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
-            .lkey = device.heap->lkey
+            .lkey = ctx.device->heap->lkey
     };
     struct ibv_recv_wr* wrs = (struct ibv_recv_wr*) malloc(sizeof(ibv_recv_wr) * count);
 
     for (int i = 0; i < count; i++) {
 
         struct ibv_recv_wr wr = {
-                .wr_id = (uint64_t) tag,
+                .wr_id = (uint64_t) 0,
                 .next = &wrs[i + 1],
                 .sg_list = &list,
                 .num_sge = 1,
@@ -292,7 +298,7 @@ static inline void irecv_tag_srq(device_t& device, void *src, size_t size, int t
 
 
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(srq->srq, &wrs[0], &bad_wr));
+    IBV_SAFECALL(ibv_post_srq_recv(ctx.srq->srq, &wrs[0], &bad_wr));
     return;
 }
 

@@ -44,6 +44,12 @@
  struct alignas(64) addr_t {
      fi_addr_t addr;
  };
+
+ // todo: libfabric should not have srq. find another way around it
+ struct srq_t {
+    void* srq = nullptr;
+ };
+
  struct alignas(64) req_t {
      alignas(64) volatile req_type_t type;// change to atomic
      char pad[64 - sizeof(req_type_t)];
@@ -223,7 +229,7 @@
      if (ret) FI_SAFECALL(ret);
  }
 
- static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
+ static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t *req) {
      req->type = REQ_TYPE_PEND;
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
@@ -233,7 +239,7 @@
      if (ret) FI_SAFECALL(ret);
  }
 
- static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req, int count) {
+ static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, req_t *req, int count) {
      req->type = REQ_TYPE_PEND;
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;

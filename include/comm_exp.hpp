@@ -14,7 +14,6 @@
 #include <numeric> // std::adjacent_difference
 #include <algorithm>
 
-int tx_thread_num = 3;
 int rx_thread_num = 1;
 //extern fb::time_acc_t * compute_time_accs;
 //extern fb::time_acc_t * idle_time_accs;
@@ -156,7 +155,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         for (int i = iter.first; i < skip; i += iter.second) {
             f(msg_size, i);
         }
-        // todo: add code to reset sync
         omp::proc_barrier();
         if (omp::thread_id() == 0) {
             // one thread is resetting syncs, counters etc for all workers
@@ -170,7 +168,6 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             //printf("thread %d -- rank %d finishes iter %d\n", omp::thread_id(), pmi_get_rank(), counter++);
         }
         //printf("thread %d -- rank %d done with all\n", omp::thread_id(), pmi_get_rank());
-
         omp::thread_barrier();
         t = wall_time() - t;
 
