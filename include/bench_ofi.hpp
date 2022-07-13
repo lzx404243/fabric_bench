@@ -126,7 +126,8 @@
      return FB_OK;
  }
 
- static inline int init_ctx(device_t *device, cq_t cq, ctx_t *ctx, uint64_t mode) {
+ static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t /*srq*/, ctx_t *ctx, uint64_t mode) {
+     cq_t cq = (mode == CTX_TX) ? send_cq : recv_cq;
      FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
      FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
      FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
@@ -135,8 +136,25 @@
      return FB_OK;
  }
 
+ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
+ }
+
  static inline int free_ctx(ctx_t *ctx) {
      FI_SAFECALL(fi_close((fid_t) ctx->ep));
+     return FB_OK;
+ }
+
+ static inline int get_num_ctx_addr(int num_sender, int num_receiver) {
+     // the receiver(destination) needs to be addressed
+     return num_receiver;
+ }
+
+ static inline ctx_t* get_exchanged_ctxs(ctx_t* tx_ctxs, ctx_t* rx_ctxs) {
+     return rx_ctxs;
+ }
+
+ static inline int init_srq(device_t device, srq_t *srq) {
+     // return without doing anything as libfabric doesn't have srq
      return FB_OK;
  }
 

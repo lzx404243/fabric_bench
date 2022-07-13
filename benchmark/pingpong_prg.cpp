@@ -54,18 +54,6 @@ void reset_counters() {
     }
 }
 
-static inline int init_ctx_common(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode)
-{
-    // todo: modify the argument, e.g send_cq--> make it optional?
-
-#ifdef FB_USE_IBV
-    return init_ctx(device, send_cq, recv_cq, srq, ctx, mode);
-#endif
-#ifdef FB_USE_OFI
-    return init_ctx(device, recv_cq, ctx, mode);
-#endif
-}
-
 void* send_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
@@ -264,15 +252,8 @@ int main(int argc, char *argv[]) {
     tx_ctxs = (ctx_t*) calloc(tx_thread_num, sizeof(ctx_t));
     rx_ctxs = (ctx_t*) calloc(rx_thread_num, sizeof(ctx_t));
     srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
-#ifdef FB_USE_IBV
-    const int num_ctx_addr = tx_thread_num;
-    // Shared receive queues queues(per progress thread)
-    ctx_t* exchanged_ctx = tx_ctxs;
-#endif
-#ifdef FB_USE_OFI
-    const int num_ctx_addr = rx_thread_num;
-    ctx_t* exchanged_ctx = rx_ctxs;
-#endif
+    const int num_ctx_addr = get_num_ctx_addr(tx_thread_num, rx_thread_num);
+    ctx_t*exchanged_ctxs = get_exchanged_ctxs(tx_ctxs, rx_ctxs);
     addrs = (addr_t*) calloc(num_ctx_addr, sizeof(addr_t));
     // Accumulators for compute time for each thread
     compute_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
@@ -284,30 +265,27 @@ int main(int argc, char *argv[]) {
     next_worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
-#ifdef FB_USE_IBV
         init_srq(device, &srqs[i]);
-#endif
         init_cq(device, &rx_cqs[i]);
-        init_ctx_common(&device, tx_cqs[i], rx_cqs[i], srqs[i % rx_thread_num], &rx_ctxs[i], CTX_RX);
+        init_ctx(&device, tx_cqs[i], rx_cqs[i], srqs[i % rx_thread_num], &rx_ctxs[i], CTX_RX);
     }
     // set up send context
     for (int i = 0; i < tx_thread_num; ++i) {
         init_cq(device, &tx_cqs[i]);
-        init_ctx_common(&device, tx_cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &tx_ctxs[i], CTX_TX);
+        init_ctx(&device, tx_cqs[i], rx_cqs[i % rx_thread_num], srqs[i % rx_thread_num], &tx_ctxs[i], CTX_TX);
     }
     for (int i = 0; i < num_ctx_addr; ++i) {
-        put_ctx_addr(exchanged_ctx[i], i);
+        put_ctx_addr(exchanged_ctxs[i], i);
     }
     flush_ctx_addr();
     for (int i = 0; i < num_ctx_addr; ++i) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
     }
-#ifdef FB_USE_IBV
     // Put the queue pairs to the correct states
     for (int i = 0; i < tx_thread_num; i++) {
         connect_ctx(tx_ctxs[i], addrs[i]);
     }
-#endif
+
     // atomic flag(per worker) used by the progress thread to signal that the worker can read from the receive buf
     syncs = (sync_t*) calloc(tx_thread_num, sizeof(sync_t));
     for (int i = 0; i < tx_thread_num; ++i) {

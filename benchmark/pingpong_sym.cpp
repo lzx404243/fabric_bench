@@ -1,9 +1,6 @@
 #include "bench_fabric.hpp"
 #include "comm_exp.hpp"
 #include "thread_utils.hpp"
-// todo: remove this include before compiling. For now this include is meant for work around with a syntax highlighting issue
-
-#include "bench_ib.hpp"
 #define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
 
 #include <sched.h>
@@ -57,7 +54,6 @@ void *send_thread(void *arg) {
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
     //printf("Setting qp to correct state");
-    connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend(ctx, buf, msg_size, &req_send);
         while (req_send.type != REQ_TYPE_NULL) progress(send_cq);
@@ -83,8 +79,6 @@ void *recv_thread(void *arg) {
     // printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
     //        (rank % (size / 2) * thread_count + thread_id),
     //        ((size / 2) * thread_count));
-    //printf("Setting qp to correct state");
-    connect_ctx(ctx, addrs[thread_id]);
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         irecv(ctx, buf, msg_size, &req_recv);
         while (req_recv.type != REQ_TYPE_NULL) progress(recv_cq);
@@ -147,9 +141,10 @@ int main(int argc, char *argv[]) {
         get_ctx_addr(device, target_rank, i, &addrs[i]);
     }
     // Put the queue pairs to the correct states
-    //    for (int i = 0; i < tx_thread_num; i++) {
-    //        connect_ctx(tx_ctxs[i], addrs[i]);
-    //    }
+    for (int i = 0; i < tx_thread_num; i++) {
+        connect_ctx(tx_ctxs[i], addrs[i]);
+    }
+
     if (rank < size / 2) {
         omp::thread_run(send_thread, tx_thread_num);
     } else {

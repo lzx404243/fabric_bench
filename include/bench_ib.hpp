@@ -38,7 +38,6 @@ struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
-    srq_t *srq = nullptr;
 };
 
 struct alignas(64) addr_t {
@@ -147,7 +146,7 @@ static inline int init_srq(device_t device, srq_t *srq) {
 }
 
 static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode) {
-    // todo: if CTX_RX mode, create ctx without queue pair, but need the device, and srq
+    // todo: if CTX_RX mode, add documentation saying it's not doint much
     ctx->device = device;
     if (mode == CTX_TX) {
         // Create and initialize queue pair
@@ -157,11 +156,7 @@ static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t s
         struct conn_info *local_conn_info = &ctx->local_conn_info;
         local_conn_info->qp_num = ctx->qp->qp_num;
         local_conn_info->lid = device->port_attr.lid;
-    } else {
-        // recv context
-        ctx->srq = srq;
     }
-
     return FB_OK;
 }
 
@@ -171,6 +166,16 @@ static inline int free_ctx(ctx_t *ctx) {
     // todo: might need to free ctx->local_conn_info
     return FB_OK;
 }
+
+static inline int get_num_ctx_addr(int num_sender, int num_receiver) {
+    // only the sender has queue pair that needs to be addressed
+    return num_sender;
+}
+
+static inline ctx_t* get_exchanged_ctxs(ctx_t* tx_ctxs, ctx_t* rx_ctxs) {
+    return tx_ctxs;
+}
+
 static inline int put_ctx_addr(ctx_t ctx, int id) {
     int comm_rank = pmi_get_rank();
     char key[256];
@@ -206,6 +211,7 @@ static inline void connect_ctx(ctx_t &ctx, addr_t target) {
 }
 
 static inline int progress(cq_t cq) {
+    // todo: make the following as config, along with other things else
     const int numToPoll = 16;
     struct ibv_wc wc[numToPoll];
     int numCompleted;
@@ -298,7 +304,7 @@ static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, req_t
 
 
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(ctx.srq->srq, &wrs[0], &bad_wr));
+    IBV_SAFECALL(ibv_post_srq_recv(ctx.qp->srq, &wrs[0], &bad_wr));
     return;
 }
 
