@@ -35,6 +35,8 @@ counter_t *next_worker_idxes;
 std::vector<int> prg_thread_bindings;
 int compute_time_in_us = 0;
 int prefilled_work = 0;
+const int NUM_PREPOST_RECV = 2048;
+
 
 // in the progress thread setup, the worker thread is not receiving messages
 // so the following function is left empty
@@ -63,13 +65,12 @@ void* send_thread(void* arg) {
     ctx_t& tx_ctx = tx_ctxs[thread_id];
     char *s_buf = (char*) device.heap_ptr + thread_id * 2 * max_size;
     auto& cq = tx_cqs[thread_id];
-    req_t req = {REQ_TYPE_NULL};
     time_acc_t &time_acc = compute_time_accs[thread_id];
     time_acc_t &idle_time_acc = idle_time_accs[thread_id];
     bool idled = false;
     struct timespec start, stop;
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        isend(tx_ctx, s_buf, msg_size, addr, &req);
+        isend(tx_ctx, s_buf, msg_size, addr);
         progress(cq);
         // progress for send completion. Note that we don't block  for the completion of the send here
         while (syncs[thread_id].sync == 0) {
@@ -111,7 +112,6 @@ void* recv_thread(void* arg) {
     addr_t& addr = addrs[thread_id % rx_thread_num];
     ctx_t& tx_ctx = tx_ctxs[thread_id];
     char *s_buf = (char*) device.heap_ptr + thread_id * 2 * max_size;
-    req_t req = {REQ_TYPE_NULL};
     int cpu_num = sched_getcpu();
     auto& cq = tx_cqs[thread_id];
     time_acc_t &time_acc = compute_time_accs[thread_id];
@@ -142,7 +142,7 @@ RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_si
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
         }
-        isend(tx_ctx, s_buf, msg_size, addr, &req);
+        isend(tx_ctx, s_buf, msg_size, addr);
         progress(cq);
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -161,6 +161,7 @@ void incrementWorkerIdx(int progress_thread_id, long long& workerIdx) {
         workerIdx = progress_thread_id;
     }
 }
+
 void progress_thread(int id) {
     if (bind_prg_thread) {
         // bind progress thread to core using the input binding specification if available
@@ -172,18 +173,14 @@ void progress_thread(int id) {
         }
     }
     ctx_t& rx_ctx = rx_ctxs[id];
-    // todo: remove the reqs. not needed
-    req_t *reqs = (req_t*) calloc(tx_thread_num, sizeof(req_t));
     long long& progress_counter = progress_counters[id].count;
     long long& next_worker_idx = next_worker_idxes[id].count;
     // first worker id
     next_worker_idx = id;
     progress_counter = 0;
-
-    const int NUM_PREPOST = 2048;
     char *buf = (char*) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
     // all using tag 0
-    irecv(rx_ctx, buf, max_size, ADDR_ANY, &reqs[0], NUM_PREPOST);
+    irecv(rx_ctx, buf, max_size, ADDR_ANY, NUM_PREPOST_RECV);
     // Mark the thread as started
     thread_started++;
     while (!thread_stop.load()) {
@@ -196,9 +193,8 @@ void progress_thread(int id) {
         }
         // refill the receive queue with receive requests
         char* buf = (char *) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
-        irecv(rx_ctx, buf, max_size, ADDR_ANY, &reqs[0], numRecvCompleted);
+        irecv(rx_ctx, buf, max_size, ADDR_ANY, numRecvCompleted);
     }
-    free(reqs);
 }
 
 int main(int argc, char *argv[]) {

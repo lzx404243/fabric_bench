@@ -9,8 +9,6 @@
 
 namespace fb {
 
-const int RX_QUEUE_LEN = 4096;
-
 struct device_t {
     ibv_context *dev_ctx;
     ibv_pd *dev_pd;

@@ -247,24 +247,22 @@
      if (ret) FI_SAFECALL(ret);
  }
 
- static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t *req) {
-     req->type = REQ_TYPE_PEND;
+ static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target) {
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
      do {
-         ret = fi_send(ctx.ep, src, size, desc, target.addr, req);
+         ret = fi_send(ctx.ep, src, size, desc, target.addr, nullptr);
      } while (ret == -FI_EAGAIN);
      if (ret) FI_SAFECALL(ret);
  }
 
- static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, req_t *req, int count) {
-     req->type = REQ_TYPE_PEND;
+ static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
      constexpr uint64_t IGNORE_ALL = (uint64_t) - 1;
      for (int i = 0; i < count; i++) {
          do {
-             ret = fi_recv(ctx.ep, src, size, desc, source.addr, req);
+             ret = fi_recv(ctx.ep, src, size, desc, source.addr, nullptr);
          } while (ret == -FI_EAGAIN);
          if (ret) FI_SAFECALL(ret);
      }

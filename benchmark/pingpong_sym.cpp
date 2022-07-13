@@ -17,7 +17,6 @@ cq_t *recv_cqs;
 
 ctx_t *tx_ctxs;
 addr_t *addrs;
-reqs_t *reqs;
 
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 //const int NUM_PREPOST_RECV = 0;
@@ -25,7 +24,6 @@ const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 void prepost_recv(int thread_id) {
     ctx_t &ctx = tx_ctxs[thread_id];
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
-    req_t& req_recv = reqs[thread_id].req_recv;
     for (int i = 0; i < NUM_PREPOST_RECV; i++) {
         irecv(ctx, buf, 8, &req_recv);
     }
