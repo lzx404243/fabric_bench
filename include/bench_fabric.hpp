@@ -12,8 +12,8 @@ namespace fb {
  * Context mode
  */
 enum ctx_mode_t {
-    CTX_TX, /**< Transmit context */
-    CTX_RX  /**< Receive context */
+    CTX_TX = 1ULL << 0, /** Transmit context */
+    CTX_RX = 1ULL << 1,  /** Receive context */
 };
 
 /**

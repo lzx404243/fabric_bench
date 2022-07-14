@@ -11,6 +11,7 @@ using namespace fb;
 using namespace boost;
 
 int tx_thread_num = 4;
+int rx_thread_num = 1;
 int min_size = 8;
 int max_size = 1024;
 const bool bind_prg_thread = true;
@@ -30,18 +31,16 @@ time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
 counter_t *next_worker_idxes;
-
-
 std::vector<int> prg_thread_bindings;
+
 int compute_time_in_us = 0;
 int prefilled_work = 0;
 const int NUM_PREPOST_RECV = 2048;
 
-
 // in the progress thread setup, the worker thread is not receiving messages
 // so the following function is left empty
 // todo: may refractor to a preSKIP_hook()
-void prepost_recv(int thread_id) {
+void prepost_recv(int, int) {
 
 }
 

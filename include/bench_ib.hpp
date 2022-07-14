@@ -36,6 +36,7 @@ struct alignas(64) ctx_t {
     ibv_qp *qp = nullptr;
     conn_info local_conn_info;
     device_t *device = nullptr;
+    ibv_srq *srq = nullptr;
 };
 
 struct alignas(64) addr_t {
@@ -47,10 +48,7 @@ struct req_t {
     char pad[64 - sizeof(req_type_t)];
 };
 
-struct alignas(64) reqs_t {
-    req_t req_send = {REQ_TYPE_NULL};
-    req_t req_recv = {REQ_TYPE_NULL};
-};
+const addr_t ADDR_ANY = {};
 
 static inline int init_device(device_t *device, bool thread_safe) {
     int num_devices;
@@ -144,17 +142,20 @@ static inline int init_srq(device_t device, srq_t *srq) {
 }
 
 static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t srq, ctx_t *ctx, uint64_t mode) {
-    // todo: if CTX_RX mode, add documentation saying it's not doint much
     ctx->device = device;
-    if (mode == CTX_TX) {
-        // Create and initialize queue pair
-        ctx->qp = qp_create(device, send_cq, recv_cq, srq);
-        qp_init(ctx->qp, (int) device->dev_port);
-        // Save local conn info in ctx
-        struct conn_info *local_conn_info = &ctx->local_conn_info;
-        local_conn_info->qp_num = ctx->qp->qp_num;
-        local_conn_info->lid = device->port_attr.lid;
+    if (mode == CTX_RX) {
+        // receive-only context. Only need to set the share receive queue
+        ctx->srq = srq.srq;
+        return;
     }
+    // Create and initialize queue pair
+    ctx->qp = qp_create(device, send_cq, recv_cq, srq);
+    qp_init(ctx->qp, (int) device->dev_port);
+    // Save local conn info in ctx for later exchange
+    struct conn_info *local_conn_info = &ctx->local_conn_info;
+    local_conn_info->qp_num = ctx->qp->qp_num;
+    local_conn_info->lid = device->port_attr.lid;
+
     return FB_OK;
 }
 
@@ -259,14 +260,12 @@ static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t
 }
 
 // used in symmetric setup, but not the progress thread one
-static inline void irecv_non_srq(ctx_t ctx, void *src, size_t size, req_t *req) {
-    req->type = REQ_TYPE_PEND;
+static inline void irecv_non_srq(ctx_t ctx, void *src, size_t size) {
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey};
     struct ibv_recv_wr wr = {
-            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
     };
@@ -275,17 +274,22 @@ static inline void irecv_non_srq(ctx_t ctx, void *src, size_t size, req_t *req) 
     return;
 }
 
-static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, req_t *req, int count) {
-
+static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+    // todo: merged non-srq and srq version of code
     if (count == 0) {
         return;
     }
-
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey
     };
+}
+
+static inline void irecv_srq(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+
+
+    // todo: no need to malloc.
     struct ibv_recv_wr* wrs = (struct ibv_recv_wr*) malloc(sizeof(ibv_recv_wr) * count);
 
     for (int i = 0; i < count; i++) {

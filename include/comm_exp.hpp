@@ -14,7 +14,7 @@
 #include <numeric> // std::adjacent_difference
 #include <algorithm>
 
-int rx_thread_num = 1;
+extern int rx_thread_num;
 //extern fb::time_acc_t * compute_time_accs;
 //extern fb::time_acc_t * idle_time_accs;
 //extern fb::counter_t* progress_counters;
@@ -25,7 +25,7 @@ std::vector<std::vector<double>> checkpointTimesAllSkip;
 std::vector<double> totalExecTimes;
 omp_lock_t writelock;
 
-void prepost_recv(int thread_id);
+void prepost_recv(int thread_id, int message_size);
 void reset_counters();
 
 namespace fb {
@@ -149,7 +149,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             skip = SKIP_LARGE;
         }
         // prepost receives
-        prepost_recv(omp::thread_id());
+        prepost_recv(omp::thread_id(), msg_size);
         omp::proc_barrier();
         // warm up loop
         for (int i = iter.first; i < skip; i += iter.second) {

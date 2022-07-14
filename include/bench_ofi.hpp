@@ -50,16 +50,9 @@
     void* srq = nullptr;
  };
 
- struct alignas(64) req_t {
-     alignas(64) volatile req_type_t type;// change to atomic
-     char pad[64 - sizeof(req_type_t)];
- };
-
  const addr_t ADDR_ANY = {FI_ADDR_UNSPEC};
 
  static inline int init_device(device_t *device, bool thread_safe) {
-     int comm_rank = pmi_get_rank();
-     int comm_size = pmi_get_size();
      // todo: make this configuration more explicit
      const char* DEV_NAME = "mlx5_2";
      char* dev_str = (char*)malloc(7);
@@ -76,6 +69,7 @@
          hints->domain_attr->threading = FI_THREAD_SAFE;
      hints->caps = FI_TAGGED;
      hints->mode = FI_LOCAL_MR;
+     hints->rx_attr->size = RX_QUEUE_LEN;
 
      // Create info.
      FI_SAFECALL(fi_getinfo(FI_VERSION(1, 6), nullptr, nullptr, 0, hints, &device->info));
@@ -97,7 +91,12 @@
          .type = FI_AV_MAP
      };
      FI_SAFECALL(fi_av_open(device->domain, &av_attr, &device->av, nullptr));
-
+//          printf("%s\n%s\n%s\n%s\n",
+//                 device->info->domain_attr->name,
+//                 device->info->fabric_attr->name,
+//                 device->info->fabric_attr->prov_name,
+//                 device->info->nic->device_attr->name);
+//          printf("rx size: %d\n", device->info->rx_attr->size);
      pmi_barrier();
      return FB_OK;
  }
@@ -127,9 +126,13 @@
  }
 
  static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t /*srq*/, ctx_t *ctx, uint64_t mode) {
-     cq_t cq = (mode == CTX_TX) ? send_cq : recv_cq;
      FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
-     FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) cq.cq, FI_SEND | FI_RECV));
+     if (mode & CTX_TX) {
+         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) send_cq.cq, FI_SEND));
+     }
+     if (mode & CTX_RX) {
+         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) recv_cq.cq, FI_RECV));
+     }
      FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
      FI_SAFECALL(fi_enable(ctx->ep));
      ctx->device = device;
@@ -222,11 +225,6 @@
      ssize_t ret = fi_cq_read(cq.cq, entries, numToPoll);
      if (ret > 0) {
          return ret;
-//         req_t *r = (req_t *) entry.op_context;
-//         if (r != NULL) {
-//             r->type = REQ_TYPE_NULL;
-//             return true;
-//         }
      } else if (ret == -FI_EAGAIN) {
      } else {
          assert(ret == -FI_EAVAIL);
@@ -237,8 +235,8 @@
      return 0;
  }
 
+ // may be removed
  static inline void isend_tag(ctx_t ctx, void *src, size_t size, addr_t target, int tag, req_t *req) {
-     req->type = REQ_TYPE_PEND;
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
      do {
@@ -257,9 +255,11 @@
  }
 
  static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+     if (count == 0) {
+         return;
+     }
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
-     constexpr uint64_t IGNORE_ALL = (uint64_t) - 1;
      for (int i = 0; i < count; i++) {
          do {
              ret = fi_recv(ctx.ep, src, size, desc, source.addr, nullptr);
@@ -268,8 +268,8 @@
      }
  }
 
+ // todo: check performance and may be removed
  static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, int tag, req_t *req, int count) {
-     req->type = REQ_TYPE_PEND;
      void *desc = fi_mr_desc(ctx.device->heap_mr);
      int ret;
      constexpr uint64_t IGNORE_ALL = (uint64_t) - 1;
