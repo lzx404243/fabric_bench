@@ -182,11 +182,14 @@ void progress_thread(int id) {
     irecv(rx_ctx, buf, max_size, ADDR_ANY, NUM_PREPOST_RECV);
     // Mark the thread as started
     thread_started++;
+    int worker_idx;
+    int numRecvCompleted;
     while (!thread_stop.load()) {
-        int numRecvCompleted = progress(rx_cqs[id]);
+        numRecvCompleted = progress(rx_cqs[id]);
+        progress_counter++;
         for (int k = 0; k < numRecvCompleted; k++) {
             // assign work to workers in a round-robin manner
-            int worker_idx = next_worker_idx;
+            worker_idx = next_worker_idx;
             incrementWorkerIdx(id, next_worker_idx);
             ++syncs[worker_idx].sync;
         }
@@ -248,7 +251,7 @@ int main(int argc, char *argv[]) {
     rx_ctxs = (ctx_t*) calloc(rx_thread_num, sizeof(ctx_t));
     srqs = (srq_t*) calloc(rx_thread_num, sizeof(srq_t));
     const int num_ctx_addr = get_num_ctx_addr(tx_thread_num, rx_thread_num);
-    ctx_t*exchanged_ctxs = get_exchanged_ctxs(tx_ctxs, rx_ctxs);
+    ctx_t* exchanged_ctxs = get_exchanged_ctxs(tx_ctxs, rx_ctxs);
     addrs = (addr_t*) calloc(num_ctx_addr, sizeof(addr_t));
     // Accumulators for compute time for each thread
     compute_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
