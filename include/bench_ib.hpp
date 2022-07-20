@@ -43,11 +43,6 @@ struct alignas(64) addr_t {
     conn_info remote_conn_info;
 };
 
-struct req_t {
-    alignas(64) volatile req_type_t type;// change to atomic
-    char pad[64 - sizeof(req_type_t)];
-};
-
 const addr_t ADDR_ANY = {};
 
 static inline int init_device(device_t *device, bool thread_safe) {
@@ -146,7 +141,7 @@ static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t s
     if (mode == CTX_RX) {
         // receive-only context. Only need to set the share receive queue
         ctx->srq = srq.srq;
-        return;
+        return FB_OK;
     }
     // Create and initialize queue pair
     ctx->qp = qp_create(device, send_cq, recv_cq, srq);
@@ -160,8 +155,14 @@ static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t s
 }
 
 static inline int free_ctx(ctx_t *ctx) {
-    IBV_SAFECALL(ibv_destroy_qp(ctx->qp));
-    ctx->qp = nullptr;
+    if (ctx->qp) {
+        IBV_SAFECALL(ibv_destroy_qp(ctx->qp));
+        ctx->qp = nullptr;
+    }
+    if (ctx->srq) {
+        IBV_SAFECALL(ibv_destroy_srq(ctx->srq));
+        ctx->srq = nullptr;
+    }
     // todo: might need to free ctx->local_conn_info
     return FB_OK;
 }
@@ -228,15 +229,11 @@ static inline int progress(cq_t cq) {
                    wc[i].status);
             exit(EXIT_FAILURE);
         }
-        // todo: the following is used in the symetric case and may be removed
-        //  got completed entry from cq. set result type
-//        auto* req = (req_t*) wc[i].wr_id;
-//        req->type = REQ_TYPE_NULL;
     }
     return numCompleted;
 }
 
-static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t *req) {
+static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target) {
 
     int send_flags = IBV_SEND_SIGNALED;
     if (size < PERFTEST_MAX_INLINE_SIZE) {
@@ -248,7 +245,6 @@ static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t
             .lkey = ctx.device->heap->lkey};
 
     struct ibv_send_wr wr = {
-            .wr_id = (uintptr_t)req,
             .sg_list = &list,
             .num_sge = 1,
             .opcode = IBV_WR_SEND,
@@ -259,54 +255,39 @@ static inline void isend(ctx_t ctx, void *src, size_t size, addr_t target, req_t
     return;
 }
 
-// used in symmetric setup, but not the progress thread one
-static inline void irecv_non_srq(ctx_t ctx, void *src, size_t size) {
-    struct ibv_sge list = {
-            .addr = (uintptr_t) src,
-            .length = size,
-            .lkey = ctx.device->heap->lkey};
-    struct ibv_recv_wr wr = {
-            .sg_list = &list,
-            .num_sge = 1,
-    };
-    struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_recv(ctx.qp, &wr, &bad_wr));
-    return;
-}
-
 static inline void irecv(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
-    // todo: merged non-srq and srq version of code
     if (count == 0) {
         return;
     }
+    struct ibv_recv_wr wrs[count];
     struct ibv_sge list = {
             .addr = (uintptr_t) src,
             .length = size,
             .lkey = ctx.device->heap->lkey
     };
-}
-
-static inline void irecv_srq(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
-
-
-    // todo: no need to malloc.
-    struct ibv_recv_wr* wrs = (struct ibv_recv_wr*) malloc(sizeof(ibv_recv_wr) * count);
-
     for (int i = 0; i < count; i++) {
-
         struct ibv_recv_wr wr = {
                 .wr_id = (uint64_t) 0,
                 .next = &wrs[i + 1],
                 .sg_list = &list,
                 .num_sge = 1,
-                };
+        };
         wrs[i] = wr;
     }
     wrs[count - 1].next = NULL;
-
-
     struct ibv_recv_wr *bad_wr;
-    IBV_SAFECALL(ibv_post_srq_recv(ctx.qp->srq, &wrs[0], &bad_wr));
+    if (ctx.srq) {
+        IBV_SAFECALL(ibv_post_srq_recv(ctx.srq, &wrs[0], &bad_wr));
+    } else {
+        IBV_SAFECALL(ibv_post_recv(ctx.qp, &wrs[0], &bad_wr));
+    }
+
+}
+
+static inline void irecv_srq(ctx_t ctx, void *src, size_t size, addr_t source, int count) {
+
+    // todo: no need to malloc.
+
     return;
 }
 

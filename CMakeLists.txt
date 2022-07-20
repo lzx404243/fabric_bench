@@ -13,7 +13,7 @@ check_c_source_compiles(
     HAVE_RESTRICT
 )
 
-set(FB_SERVER OFI CACHE STRING "Server: OFI MPI IBV")
+set(FB_SERVER IBV CACHE STRING "Server: OFI MPI IBV")
 
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 
