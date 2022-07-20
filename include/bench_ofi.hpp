@@ -67,7 +67,6 @@
      hints->domain_attr->data_progress = FI_PROGRESS_MANUAL;
      if (thread_safe)
          hints->domain_attr->threading = FI_THREAD_SAFE;
-     hints->caps = FI_TAGGED;
      hints->mode = FI_LOCAL_MR;
      hints->rx_attr->size = RX_QUEUE_LEN;
 
@@ -126,12 +125,16 @@
  }
 
  static inline int init_ctx(device_t *device, cq_t send_cq, cq_t recv_cq, srq_t /*srq*/, ctx_t *ctx, uint64_t mode) {
+     // For bidirectional ep, separate cqs for send and receive
+     // For send-only ep and recv-only ep, one cq is used but needs to support both send and receive to match the device endpoint capabilities
+     uint64_t send_cq_flags = (mode & CTX_TX) && (mode & CTX_RX) ? FI_SEND : FI_SEND | FI_RECV;
+     uint64_t recv_cq_flags = (mode & CTX_TX) && (mode & CTX_RX) ? FI_RECV : FI_SEND | FI_RECV;
      FI_SAFECALL(fi_endpoint(device->domain, device->info, &ctx->ep, nullptr));
      if (mode & CTX_TX) {
-         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) send_cq.cq, FI_SEND));
+         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) send_cq.cq, send_cq_flags));
      }
      if (mode & CTX_RX) {
-         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) recv_cq.cq, FI_RECV));
+         FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) recv_cq.cq, recv_cq_flags));
      }
      FI_SAFECALL(fi_ep_bind(ctx->ep, (fid_t) device->av, 0));
      FI_SAFECALL(fi_enable(ctx->ep));
