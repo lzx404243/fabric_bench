@@ -6,11 +6,10 @@
 #include <boost/tokenizer.hpp>
 #include <chrono>
 #include <math.h>
+#define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
+#include <sched.h>
 
 using namespace boost;
-#define _GNU_SOURCE // sched_getcpu(3) is glibc-specific (see the man page)
-
-#include <sched.h>
 using namespace fb;
 
 int tx_thread_num = 4;
@@ -26,6 +25,7 @@ addr_t *remote_recv_ep_addrs;
 addr_t *remote_send_ep_addrs;
 counter_t *next_worker_idxes;
 bool show_extra_stats = true;
+bool bind_prg_thread = true;
 sync_t *syncs;
 buffer_t * bufs;
 std::atomic<bool> thread_stop = {false};
@@ -35,28 +35,23 @@ time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
 
-
 std::vector<int> prg_thread_bindings;
 int compute_time_in_us = 0;
 int prefilled_work = 0;
 int num_worker_per_qp = 1;
 int works_per_progress_thread = -1;
-/* Callback to handle receive active message */
+
+/* Callback to handle receive of active messages */
 static ucs_status_t recv_msg_cb(void *arg, void *data, size_t length,
                                 unsigned flags) {
-
-    //printf("callback got data %s, length is %d \n",  (const char*)data, length);
-
     // dispatch to worker
     int prg_thread_id = *((int *) arg);
-    auto&worker_num = next_worker_idxes[prg_thread_id].count;
-    // increment counter in a round-robin manner
-    //printf("progress thread id is %d - receving for worker %d \n",  prg_thread_id, worker_num);
-    /* We need to copy-out data and return UCS_OK if we want to use the data outside the callback */
+    auto &worker_num = next_worker_idxes[prg_thread_id].count;
+    //We need to copy-out data and return UCS_OK if we want to use the data outside the callback
     char *buf = bufs[worker_num].buf;
     memcpy(buf, data, length);
     syncs[worker_num].sync++;
-    // next worker
+    // update next worker in a round-robin manner
     worker_num += rx_thread_num;
     if (worker_num >= tx_thread_num) {
         worker_num = prg_thread_id;
@@ -78,7 +73,6 @@ void *send_thread(void *arg) {
 //         printf("I am %d, sending msg. iter first is %d, iter second is %d\n", rank,
 //                (rank % (size / 2) * thread_count + thread_id),
 //                ((size / 2) * thread_count));
-    int count = 0;
     int dest_message_id = thread_id % rx_thread_num;
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend_tag(ctx, s_buf, msg_size, dest_message_id);
@@ -102,7 +96,6 @@ void *send_thread(void *arg) {
         // compute
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
@@ -112,10 +105,9 @@ void *send_thread(void *arg) {
         fprintf(stderr, "Thread %3d migrated to %3d\n", thread_id, cpu_num_final);
         exit(2);
     }
-
     return nullptr;
 }
-//
+
 void *recv_thread(void *arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
@@ -126,7 +118,6 @@ void *recv_thread(void *arg) {
     time_acc_t &idle_time_acc = idle_time_accs[thread_id];
     bool idled = false;
     struct timespec start, stop;
-
     fprintf(stderr, "Thread %3d is running on CPU %3d\n", thread_id, cpu_num);
 
 //         printf("I am %d, recving msg. iter first is %d, iter second is %d\n", rank,
@@ -142,9 +133,6 @@ void *recv_thread(void *arg) {
                 idled = true;
                 clock_gettime(CLOCK_REALTIME, &start);
             }
-            // progress for send completion. Note that we don't block for the completion of the send here
-            // todo: maybe move progress of send to here
-            //progress(ctx);
         }
         if (idled) {
             // stop timer
@@ -158,11 +146,8 @@ void *recv_thread(void *arg) {
         // compute
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(compute_time_in_us));
         }
         isend_tag(ctx, s_buf, msg_size, dest_message_id);
-        //progress_new(cq, nullptr);
-
         }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
 
     // check whether the thread has migrated
@@ -175,7 +160,6 @@ void *recv_thread(void *arg) {
 }
 
 void progress_thread(int id) {
-    bool bind_prg_thread = true;
     if (bind_prg_thread) {
         // bind progress thread to core using the input binding specification if available
         auto err = comm_set_me_to(!prg_thread_bindings.empty() ? prg_thread_bindings[id] : 15);
@@ -235,7 +219,7 @@ int main(int argc, char *argv[]) {
         for (auto t : tokens) {
             prg_thread_bindings.push_back(std::stoi(t));
         }
-        // make sure the number of bindings equal to the number of progress thread
+        // make sure the number of bindings equal to the number of progress threads
         if (prg_thread_bindings.size() != rx_thread_num) {
             fprintf(stderr, "number of binding specification doesn't match the number of progress thread.\n");
             exit(EXIT_FAILURE);
@@ -268,8 +252,6 @@ int main(int argc, char *argv[]) {
 
     comm_init();
     ucs_status_t status;
-    // device initialization
-    //init_device(&device);
     rank = pmi_get_rank();
     size = pmi_get_size();
     target_rank = (rank + size / 2) % size;
@@ -289,14 +271,12 @@ int main(int argc, char *argv[]) {
     idle_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
     // recv buffers for each worker thread
     bufs = (buffer_t*) calloc(tx_thread_num, sizeof(buffer_t));
-    //printf("start initing receive ctx\n");
     for (int i = 0; i < rx_thread_num; ++i) {
         init_ctx(&progress_ctxs[i], works_per_progress_thread);
         put_ctx_addr(progress_ctxs[i], i, "p");
         // initialize worker index
         next_worker_idxes[i].count = i;
     }
-    //printf("done initing receive ctx\n");
     for (int i = 0; i < tx_thread_num; ++i) {
         init_ctx(&worker_ctxs[i], 1);
         put_ctx_addr(worker_ctxs[i], i, "w");
@@ -324,14 +304,14 @@ int main(int argc, char *argv[]) {
     // connect the endpoints
     for (int i = 0; i < tx_thread_num; ++i) {
         auto& remote_ep_info = remote_recv_ep_addrs[i % rx_thread_num] ;
-        //printf("connecting send ep with remote prgress thread\n");
+        // connecting send ep with remote prgress thread
         assert(worker_ctxs[i].eps.size() == 1);
         uct_ep_connect_to_ep(worker_ctxs[i].eps[0], remote_ep_info.peer_dev, remote_ep_info.peer_ep_addrs[i / rx_thread_num]);
     }
     for (int i = 0; i < rx_thread_num; ++i) {
         assert(progress_ctxs[i].eps.size() == works_per_progress_thread);
         for (int j = i; j < tx_thread_num; j+= rx_thread_num) {
-            //printf("connecting progress thread with remote send ep\n");
+            // connecting progress thread with remote send ep
             auto& remote_send_ep_info = remote_send_ep_addrs[j];
             uct_ep_connect_to_ep(progress_ctxs[i].eps[j / rx_thread_num], remote_send_ep_info.peer_dev, remote_send_ep_info.peer_ep_addrs[0]);
         }
@@ -359,8 +339,8 @@ int main(int argc, char *argv[]) {
     for (int id = 0; id < rx_thread_num; id++) {
         threads[id] = std::thread(progress_thread, id);
     }
+    // wait for progress threads set up
     while (thread_started.load() != rx_thread_num) continue;
-    //printf("all progress thread ready, starting worker\n");
     if (rank < size / 2) {
         omp::thread_run(send_thread, tx_thread_num);
     } else {
@@ -370,18 +350,7 @@ int main(int argc, char *argv[]) {
     for (int id = 0; id < rx_thread_num; id++) {
         threads[id].join();
     }
-
     // clean up resources
-//    for (int i = 0; i < rx_thread_num; ++i) {
-//        int groupCntIdx = 0;
-//        for (int workerThreadIdx = i; workerThreadIdx < tx_thread_num; workerThreadIdx +=rx_thread_num) {
-//            // workers handled by the same progress thread
-//            if (groupCntIdx++ % num_worker_per_qp == 0) {
-//                free_ctx(&worker_ctxs[workerThreadIdx]);
-//            }
-//        }
-//    }
-//    free_device(&device);
     free(remote_recv_ep_addrs);
     free(worker_ctxs);
     comm_free();
