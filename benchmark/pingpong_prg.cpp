@@ -27,6 +27,8 @@ srq_t * srqs;
 
 std::atomic<bool> thread_stop = {false};
 std::atomic<int> thread_started = {0};
+
+bool show_extra_stats = true;
 time_acc_t * compute_time_accs;
 counter_t *progress_counters;
 time_acc_t * idle_time_accs;
@@ -37,21 +39,22 @@ int compute_time_in_us = 0;
 int prefilled_work = 0;
 const int NUM_PREPOST_RECV = 2048;
 
-// in the progress thread setup, the worker thread is not receiving messages
-// so the following function is left empty
-// todo: may refractor to a preSKIP_hook()
-void prepost_recv(int, int) {
-
-}
-
-void reset_counters() {
+void reset_counters(int sync_count) {
+    if (omp::thread_id() != 0) {
+        // thread 0 is resetting syncs, counters etc for all workers
+        return;
+    }
     for (int i = 0; i < tx_thread_num; i++) {
-        // reset syncs
-        syncs[i].sync = prefilled_work;
+        // reset syncs and time stats
+        syncs[i].sync = sync_count;
+        compute_time_accs[i].tot_time_us = 0;
+        idle_time_accs[i].tot_time_us = 0;
     }
     for (int i = 0; i < rx_thread_num; i++) {
         // for all progress thread, reset next worker index to the first worker it handles
         next_worker_idxes[i].count = i;
+        // reset progress counters
+        progress_counters[i].count = 0;
     }
 }
 
@@ -197,6 +200,10 @@ void progress_thread(int id) {
         char* buf = (char *) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
         irecv(rx_ctx, buf, max_size, ADDR_ANY, numRecvCompleted);
     }
+}
+
+std::tuple<double, double, long long> get_additional_stats() {
+    return {get_overhead(compute_time_accs), get_overhead(idle_time_accs), get_progress_total(progress_counters)};
 }
 
 int main(int argc, char *argv[]) {

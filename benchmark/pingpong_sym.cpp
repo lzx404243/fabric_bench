@@ -8,8 +8,10 @@ using namespace fb;
 
 int thread_num = 4;
 int rx_thread_num = 0;
+int prefilled_work = 0;
 int min_size = 8;
 int max_size = 64 * 1024;
+bool show_extra_stats = false;
 bool touch_data = false;
 int rank, size, target_rank;
 device_t device;
@@ -21,16 +23,16 @@ addr_t *addrs;
 
 const int NUM_PREPOST_RECV = RX_QUEUE_LEN - 3;
 
-// todo: can this function be reused in the progress thread setup?
-void prepost_recv(int thread_id, int message_size) {
+void prepost_recv(int thread_id) {
     ctx_t &ctx = ctxs[thread_id];
     addr_t &addr = addrs[thread_id];
     char *buf = (char *) device.heap_ptr + thread_id * max_size;
-    irecv(ctx, buf, message_size, addr, NUM_PREPOST_RECV);
+    irecv(ctx, buf, max_size, addr, NUM_PREPOST_RECV);
 }
 
-void reset_counters() {
-}
+// not used in pingpong_sym
+void reset_counters(int sync_count) {}
+std::tuple<double, double, long long> get_additional_stats() {}
 
 void *send_thread(void *arg) {
     //printf("I am a send thread\n");
@@ -50,7 +52,7 @@ void *send_thread(void *arg) {
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend(ctx, buf, msg_size, addr);
         while (!progress(send_cq));
-        irecv(ctx, buf, msg_size, addr, 1);
+        irecv(ctx, buf, max_size, addr, 1);
         while (!progress(recv_cq));
     }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
     return nullptr;
@@ -69,7 +71,7 @@ void *recv_thread(void *arg) {
 //            (rank % (size / 2) * thread_count + thread_id),
 //            ((size / 2) * thread_count));
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
-        irecv(ctx, buf, msg_size, addr, 1);
+        irecv(ctx, buf, max_size, addr, 1);
         while (!progress(recv_cq));
         isend(ctx, buf, msg_size, addr);
         while (!progress(send_cq));
@@ -124,7 +126,10 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < thread_num; i++) {
         connect_ctx(ctxs[i], addrs[i]);
     }
-
+    // prepost recv here
+    for (int i = 0; i < thread_num; i++) {
+        prepost_recv(i);
+    }
     if (rank < size / 2) {
         omp::thread_run(send_thread, thread_num);
     } else {
