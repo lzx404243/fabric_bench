@@ -170,5 +170,8 @@ static inline void irecv_tag(ctx_t ctx, void *src, size_t size, addr_t source, i
 #ifdef FB_USE_IBV
 #include "bench_ib.hpp"
 #endif
+#ifdef FB_USE_UCX
+#include "bench_ucx.hpp"
+#endif
 
 #endif//FABRICBENCH_FABRIC_BENCH_HPP

@@ -39,25 +39,6 @@ int compute_time_in_us = 0;
 int prefilled_work = 0;
 const int NUM_PREPOST_RECV = 2048;
 
-void reset_counters(int sync_count) {
-    if (omp::thread_id() != 0) {
-        // thread 0 is resetting syncs, counters etc for all workers
-        return;
-    }
-    for (int i = 0; i < tx_thread_num; i++) {
-        // reset syncs and time stats
-        syncs[i].sync = sync_count;
-        compute_time_accs[i].tot_time_us = 0;
-        idle_time_accs[i].tot_time_us = 0;
-    }
-    for (int i = 0; i < rx_thread_num; i++) {
-        // for all progress thread, reset next worker index to the first worker it handles
-        next_worker_idxes[i].count = i;
-        // reset progress counters
-        progress_counters[i].count = 0;
-    }
-}
-
 void* send_thread(void* arg) {
     int thread_id = omp::thread_id();
     int thread_count = omp::thread_count();
@@ -199,6 +180,25 @@ void progress_thread(int id) {
         // refill the receive queue with receive requests
         char* buf = (char *) device.heap_ptr + (2 * next_worker_idx + 1) * max_size;
         irecv(rx_ctx, buf, max_size, ADDR_ANY, numRecvCompleted);
+    }
+}
+
+void reset_counters(int sync_count) {
+    if (omp::thread_id() != 0) {
+        // thread 0 is resetting syncs, counters etc for all workers
+        return;
+    }
+    for (int i = 0; i < tx_thread_num; i++) {
+        // reset syncs and time stats
+        syncs[i].sync = sync_count;
+        compute_time_accs[i].tot_time_us = 0;
+        idle_time_accs[i].tot_time_us = 0;
+    }
+    for (int i = 0; i < rx_thread_num; i++) {
+        // for all progress thread, reset next worker index to the first worker it handles
+        next_worker_idxes[i].count = i;
+        // reset progress counters
+        progress_counters[i].count = 0;
     }
 }
 

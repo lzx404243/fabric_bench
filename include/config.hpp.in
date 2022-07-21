@@ -7,6 +7,7 @@
 #cmakedefine FB_USE_OFI
 #cmakedefine FB_USE_MPI
 #cmakedefine FB_USE_IBV
+#cmakedefine FB_USE_UCX
 #cmakedefine USE_PMI2
 
 #define HEAP_SIZE 1*1024*1024
