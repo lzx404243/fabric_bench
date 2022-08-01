@@ -54,7 +54,7 @@ void *send_thread(void *arg) {
         while (!progress(send_cq));
         irecv(ctx, buf, max_size, addr, 1);
         while (!progress(recv_cq));
-    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {0, 1});
     return nullptr;
 }
 
@@ -75,7 +75,7 @@ void *recv_thread(void *arg) {
         while (!progress(recv_cq));
         isend(ctx, buf, msg_size, addr);
         while (!progress(send_cq));
-    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {0, 1});
 
     return nullptr;
 }

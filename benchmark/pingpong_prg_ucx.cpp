@@ -97,7 +97,7 @@ void *send_thread(void *arg) {
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
         }
-        }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+        }, {0, 1});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();
@@ -148,7 +148,7 @@ void *recv_thread(void *arg) {
             sleep_for_us(compute_time_in_us, time_acc);
         }
         isend_tag(ctx, s_buf, msg_size, dest_message_id);
-        }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+        }, {0, 1});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();

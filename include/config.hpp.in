@@ -10,13 +10,12 @@
 #cmakedefine FB_USE_UCX
 #cmakedefine USE_PMI2
 
-#define HEAP_SIZE 1*1024*1024
-#define CQ_SIZE 16*1024
+#define HEAP_SIZE 4*1024*1024
 #define RX_QUEUE_LEN 4096
 
 #define LARGE 8192
 
-#define TOTAL 40000
+#define TOTAL 450000
 #define SKIP 10000
 
 #define TOTAL_LARGE 10000

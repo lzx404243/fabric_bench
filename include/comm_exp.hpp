@@ -123,12 +123,11 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
     double t = 0;
     int loop = TOTAL;
     int skip = SKIP;
-
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
-        if (msg_size >= LARGE) {
-            loop = TOTAL_LARGE;
-            skip = SKIP_LARGE;
-        }
+//        if (msg_size >= LARGE) {
+//            loop = TOTAL_LARGE;
+//            skip = SKIP_LARGE;
+//        }
         reset_counters(0);
         omp::proc_barrier();
         // warm up loop
@@ -139,10 +138,8 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
         reset_counters(prefilled_work);
         omp::proc_barrier();
         t = wall_time();
-        //int counter = 0;
         for (int i = iter.first; i < loop; i += iter.second) {
             f(msg_size, i);
-            //printf("thread %d -- rank %d finishes iter %d\n", omp::thread_id(), pmi_get_rank(), counter++);
         }
         //printf("thread %d -- rank %d done with all\n", omp::thread_id(), pmi_get_rank());
         omp::thread_barrier();
@@ -162,7 +159,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             char output_str[256];
             int used = 0;
             used += snprintf(output_str + used, 256, "%-10lu %-10lu %-10.2f %-10.3f %-10.2f %-10.2f %-10.2f %-10.2f %-19Lu",
-                             msg_size, omp::thread_count() + rx_thread_num, latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms, progress_counter_sum);
+                             msg_size, (omp::thread_count() + rx_thread_num) * (pmi_get_size() / 2), latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms, progress_counter_sum);
             printf("%s\n", output_str);
             fflush(stdout);
         }

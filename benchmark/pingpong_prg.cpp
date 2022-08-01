@@ -77,7 +77,7 @@ void* send_thread(void* arg) {
         if (compute_time_in_us > 0) {
             sleep_for_us(compute_time_in_us, time_acc);
         }
-    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {0, 1});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();
@@ -127,7 +127,7 @@ RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_si
         }
         isend(tx_ctx, s_buf, msg_size, addr);
         progress(cq);
-    }, {rank % (size / 2) * thread_count + thread_id, (size / 2) * thread_count});
+    }, {0, 1});
 
     // check whether the thread has migrated
     int cpu_num_final = sched_getcpu();
