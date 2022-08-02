@@ -20,9 +20,9 @@ extern bool show_extra_stats;
 std::vector<std::vector<double>> checkpointTimesAll;
 std::vector<std::vector<double>> checkpointTimesAllSkip;
 std::vector<double> totalExecTimes;
-omp_lock_t writelock;
+bool show_per_thread_time = false;
 
-// functions implemented in the application
+// functions implemented in the applications
 void reset_counters(int);
 std::tuple<double, double, long long> get_additional_stats();
 
@@ -121,6 +121,7 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                                 const int report,
                                 FUNC &&f, std::pair<int, int> &&iter = {0, 1}) {
     double t = 0;
+    double t_finish_thread = 0;
     int loop = TOTAL;
     int skip = SKIP;
     for (size_t msg_size = range.first; msg_size <= range.second; msg_size <<= 1) {
@@ -142,8 +143,10 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
             f(msg_size, i);
         }
         //printf("thread %d -- rank %d done with all\n", omp::thread_id(), pmi_get_rank());
+        t_finish_thread = wall_time() - t;
+        totalExecTimes[omp::thread_id()] = t_finish_thread;
         omp::thread_barrier();
-        t = wall_time() - t;
+        t = *std::max_element(totalExecTimes.begin(), totalExecTimes.end());
 
         if (report) {
             double latency = 1e6 * get_latency(t, 2.0 * loop);
@@ -162,6 +165,12 @@ static inline void RUN_VARY_MSG(std::pair<size_t, size_t> &&range,
                              msg_size, (omp::thread_count() + rx_thread_num) * (pmi_get_size() / 2), latency, msgrate, bw, completion_time_ms, compute_time_ms, idle_time_ms, progress_counter_sum);
             printf("%s\n", output_str);
             fflush(stdout);
+            if (show_per_thread_time) {
+                printf("thread_id,total_time,rank#\n");
+                for (int id = 0; id < omp::thread_count(); id++) {
+                    printf("%d,%f,%d\n", id, totalExecTimes[id] * 1000, pmi_get_rank());
+                }
+            }
         }
     }
     omp::proc_barrier();

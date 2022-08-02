@@ -108,8 +108,6 @@ int main(int argc, char *argv[]) {
     checkpointTimesAll.resize(thread_num);
     checkpointTimesAllSkip.resize(thread_num);
     totalExecTimes.resize(thread_num);
-    // omp mutex
-    omp_init_lock(&writelock);
 
     //printf("init per thread structures\n");
     for (int i = 0; i < thread_num; ++i) {
@@ -135,15 +133,12 @@ int main(int argc, char *argv[]) {
     } else {
         omp::thread_run(recv_thread, thread_num);
     }
-
     //printf("Done: Freeing resources\n");
     for (int i = 0; i < thread_num; ++i) {
         free_ctx(&ctxs[i]);
         free_cq(&send_cqs[i]);
         free_cq(&recv_cqs[i]);
     }
-    omp_destroy_lock(&writelock);
-
     free_device(&device);
     free(addrs);
     free(ctxs);
