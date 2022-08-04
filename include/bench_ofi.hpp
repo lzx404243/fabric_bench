@@ -112,7 +112,7 @@
 
  static inline int init_cq(device_t device, cq_t *cq) {
      fi_cq_attr cq_attr{
-             .size = CQ_SIZE,
+             .size = RX_QUEUE_LEN + 1,
              .format = FI_CQ_FORMAT_CONTEXT,
      };
      FI_SAFECALL(fi_cq_open(device.domain, &cq_attr, &cq->cq, nullptr));

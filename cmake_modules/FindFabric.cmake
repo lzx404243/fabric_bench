@@ -80,6 +80,8 @@ set(_PSM_PC libpsm2)
 set(_PSM_HEADER "psm2.h")
 set(_PSM_LIB psm2)
 
+list(APPEND CMAKE_PREFIX_PATH "/home/zli89/libfabric_1.14.0/")
+
 foreach(FABRIC IN ITEMS OFI IBV PSM)
   if(NOT Fabric_FIND_COMPONENTS OR ${FABRIC} IN_LIST Fabric_FIND_COMPONENTS)
     pkg_check_modules(_Fabric_${FABRIC}_PC QUIET ${_${FABRIC}_PC})

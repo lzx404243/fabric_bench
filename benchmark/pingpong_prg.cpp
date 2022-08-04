@@ -55,7 +55,7 @@ void* send_thread(void* arg) {
     RUN_VARY_MSG({min_size, max_size}, (rank == 0 && thread_id == 0), [&](int msg_size, int iter) {
         isend(tx_ctx, s_buf, msg_size, addr);
         progress(cq);
-        // progress for send completion. Note that we don't block  for the completion of the send here
+        // progress for send completion. Note that we don't block for the completion of the send here
         while (syncs[thread_id].sync == 0) {
             // idle
             if (!idled) {
@@ -268,6 +268,7 @@ int main(int argc, char *argv[]) {
     idle_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
     // the index of next available workers for each progress thread
     next_worker_idxes = (counter_t *) calloc(rx_thread_num, sizeof(counter_t));
+    totalExecTimes.resize(tx_thread_num);
     // Set up receive completion queue, one per progress thread
     for (int i = 0; i < rx_thread_num; ++i) {
         init_srq(device, &srqs[i]);

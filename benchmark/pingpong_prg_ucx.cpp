@@ -271,6 +271,7 @@ int main(int argc, char *argv[]) {
     idle_time_accs = (time_acc_t *) calloc(tx_thread_num, sizeof(time_acc_t));
     // recv buffers for each worker thread
     bufs = (buffer_t*) calloc(tx_thread_num, sizeof(buffer_t));
+    totalExecTimes.resize(tx_thread_num);
     for (int i = 0; i < rx_thread_num; ++i) {
         init_ctx(&progress_ctxs[i], works_per_progress_thread);
         put_ctx_addr(progress_ctxs[i], i, "p");
