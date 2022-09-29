@@ -1,15 +1,15 @@
 #!/bin/bash
 #SBATCH --partition=compute
 #SBATCH --account=uic193
-#SBATCH --time=15:00
+#SBATCH --time=05:00
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=64
+#SBATCH --ntasks-per-node=128
 #SBATCH --exclusive
 #SBATCH --job-name=basic
 #SBATCH --output=slurm_output_%j.txt
 #SBATCH --error=slurm_error_%j.txt
 
-fabric=ofi
+fabric=ibv
 path_to_exe=${1:-/home/zli89/clion_fb/cmake-build-debug/benchmark/${fabric}}
 
 export OMP_PLACES=cores
@@ -22,6 +22,7 @@ srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong
 srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_sym 16 8 8
 srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_sym 32 8 8
 srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_sym 64 8 8
+srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --mpi=pmi2 ${path_to_exe}/pingpong_sym 128 8 8
 
 echo "srun -n 2 pingpong_sym(${fabric}-multi-process-8b-all-threads)"
 srun --nodes=2 --ntasks-per-node=1 --ntasks=2 --cpu-bind=core --mpi=pmi2 ${path_to_exe}/pingpong_sym 1 8 8
