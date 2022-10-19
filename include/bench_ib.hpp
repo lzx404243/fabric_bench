@@ -97,11 +97,10 @@ static inline int init_device(device_t *device, bool thread_safe) {
 }
 
 static inline int free_device(device_t *device) {
-    auto ctx = ibv_close_device(device->dev_ctx);
-    if (ctx == 0) {
+    int error = ibv_close_device(device->dev_ctx);
+    if (error) {
         exit(EXIT_FAILURE);
     }
-
     return FB_OK;
 }
 

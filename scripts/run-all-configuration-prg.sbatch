@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=compute
 #SBATCH --account=uic193
-#SBATCH --time=02:00
+#SBATCH --time=10:00
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=128
 #SBATCH --exclusive
@@ -13,6 +13,10 @@ fabric=ibv
 path_to_exe=${1:-/home/zli89/clion_fb/cmake-build-debug/benchmark/${fabric}}
 allComputeTime=(0 10)
 
+# additional IBV environment variable
+export MLX5_TOTAL_UUARS=129
+export MLX5_NUM_LOW_LAT_UUARS=128
+export MLX5_SINGLE_THREADED=1
 
 for compute_time in ${allComputeTime[@]}; do
 
